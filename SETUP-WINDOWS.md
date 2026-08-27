@@ -102,7 +102,12 @@ Every command from here on runs from this directory (the repo root).
 
 ---
 
-## 1. Environment files
+## 1. Configuration files
+
+None of this is in git, so a fresh clone has none of it. Create it all **before**
+the first `docker compose up` (§2).
+
+### 1a. Mediator `.env` files
 
 Four services read a `.env` that is **not** in git. Create each from its
 example:
@@ -143,6 +148,37 @@ foreach ($d in 'mediator','admin-mediator','patient-portal-mediator','fhir-intak
 }
 ```
 
+### 1b. Pre-create `openhim-config\realm-public.pem` — do not skip
+
+`docker-compose.yml` bind-mounts `./openhim-config/realm-public.pem` into
+`openhim-core`. `*.pem` is gitignored and `openhim-config/` has **no tracked
+files**, so after a fresh clone that path does not exist — and Docker creates a
+missing bind-mount target as a **directory**. The entrypoint then runs `cat` on
+a directory, gets nothing, `authentication_jwt_secretOrPublicKey` ends up empty,
+and every token fails with:
+
+```
+JWT could not be verified: secret or public key must be provided
+```
+
+On a fresh clone this is guaranteed, not bad luck. Create the file first — §6
+overwrites it with the real key:
+
+```powershell
+New-Item -ItemType Directory -Force openhim-config | Out-Null
+if (-not (Test-Path openhim-config\realm-public.pem)) {
+  New-Item -ItemType File openhim-config\realm-public.pem | Out-Null
+}
+```
+
+The `Test-Path` guard matters: `New-Item -ItemType File -Force` would **truncate
+an existing key**. Confirm it is a file, not a directory — `Mode` must not begin
+with `d`:
+
+```powershell
+Get-Item openhim-config\realm-public.pem | Select-Object Mode, Length, Name
+```
+
 ---
 
 ## 2. Containers
@@ -159,6 +195,7 @@ Running: `hapi-db`, `mongo-db`, `openhim-core`, `openhim-console`, `fhir`,
 > **Never `docker compose down`** (wipes Keycloak's H2 store and with it the
 > realm). Use `docker compose stop` / `docker compose start`.
 > Mediators crash-loop until steps 3 and 6 are done — that is expected.
+> When you *intend* to wipe and rebuild, that is §11, not an accident.
 
 The first run pulls several GB of images. If a container exits immediately, read
 its log before anything else:
@@ -315,10 +352,18 @@ Transaction-port errors:
 
 > **Windows gotcha.** If Docker Desktop started the stack before
 > `realm-public.pem` existed, it created an empty **directory** at
-> `openhim-config\realm-public.pem`. `extract-realm-pubkey.ps1` detects this and
-> prints the fix: stop `openhim-core`,
-> `Remove-Item -Recurse openhim-config\realm-public.pem`, re-run the script,
-> force-recreate.
+> `openhim-config\realm-public.pem` (§1b) and no key can be written there.
+> Recover with:
+>
+> ```powershell
+> docker compose stop openhim-core
+> Remove-Item -Recurse -Force .\openhim-config\realm-public.pem
+> pwsh -File .\keycloak\extract-realm-pubkey.ps1
+> docker compose up -d --force-recreate openhim-core
+> docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
+> ```
+>
+> Doing §1b before the first `docker compose up` avoids this entirely.
 
 ---
 
@@ -546,13 +591,55 @@ depend on should be on `KC_DB=postgres` (10a) so this stops being fragile.
 
 ---
 
+## 11. Starting over (full reset)
+
+To wipe everything and rebuild — fresh images, empty databases, new realm:
+
+```powershell
+docker compose down -v --rmi all      # containers + volumes + images
+```
+
+This is the one time `down` is correct: deliberate destruction, not the
+accidental `down` §2 warns about. `-v` drops the Keycloak H2 store, the OpenHIM
+Mongo database (clients, channels, transactions) and the HAPI Postgres data;
+`--rmi all` forces a re-pull.
+
+What survives on disk versus what you must redo:
+
+| Item | After the wipe |
+|---|---|
+| `keycloak\keys\*.pem` | **survives** — `create-jwt-client.ps1` reuses an existing keypair and re-registers its public key, so hospitals keep the private key you already issued |
+| `*/.env` | **survives**, but `OPENHIM_PASSWORD` is now wrong — the root password resets to `openhim-password` |
+| `openhim-config\realm-public.pem` | survives as a **stale** key — the new realm has a new RSA keypair, so §6 is mandatory |
+| Keycloak realm, clients, mappers | gone — re-run §5, then §7 per hospital |
+| OpenHIM clients, channels, transactions | gone — §7 recreates the clients |
+| HAPI Patients / Encounters / Organizations | gone — §7 recreates the Organizations |
+| JeMPI golden records | **untouched** — JeMPI is on the remote VPS, not in this stack |
+
+Then run, in order: **§2** → **§3b** and **§3c** (root password is back to
+`openhim-password`, so it must be reset and re-propagated) → **§5** → **§6** →
+**§7** per hospital → **§8** to verify.
+
+> Only if you also deleted `openhim-config\` do you need **§1b** again — a plain
+> `down -v` leaves that host file in place, so the directory trap does not
+> re-fire. Deleting the folder without recreating the file puts you straight back
+> into it.
+>
+> JeMPI keeps the golden records from your earlier runs, so a "fresh" stack will
+> still match against previously registered patients. To confirm what is there:
+> `curl.exe http://202.51.71.81:50000/JeMPI/countRecords`.
+
+---
+
 ## Quick reference
 
 | Task | Command (PowerShell 7) |
 |---|---|
 | Clone | `git clone https://github.com/ETech-Nepal/openhim.git` |
-| Create the `.env` files | `Copy-Item <svc>\.env.example <svc>\.env` (§1) |
+| Create the `.env` files | `Copy-Item <svc>\.env.example <svc>\.env` (§1a) |
+| Pre-create the key file | `New-Item -ItemType File openhim-config\realm-public.pem` (§1b) |
 | Bring the stack up | `docker compose up -d` |
+| Full reset | `docker compose down -v --rmi all` (§11) |
 | Reload a changed `.env` | `docker compose up -d --force-recreate <svc>` |
 | Create the realm | `pwsh -File .\keycloak\setup.ps1` |
 | Create/update an Organization | `pwsh -File .\keycloak\create-org.ps1 <nhfr-id> "<name>"` |
@@ -582,7 +669,8 @@ directly.
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
 | a failed call "returns" your own request JSON | that is OpenHIM's error body, not a diagnosis — get the status code + `docker compose logs openhim-core` (§8) |
 | `JWT could not be verified: secret or public key must be provided` | OpenHIM has **no** key loaded — `realm-public.pem` is empty or a directory, see the next row |
-| `realm-public.pem` is a directory | Docker created it before §6 ran — `docker compose stop openhim-core`, `Remove-Item -Recurse openhim-config\realm-public.pem`, re-run `extract-realm-pubkey.ps1`, force-recreate |
+| `realm-public.pem` is a directory | Docker created it as a mount target before §1b ran — recovery block in §6 |
+| everything 401s right after a rebuild | new realm = new RSA key, and `realm-public.pem` is stale — re-run §6 (§11) |
 | `JWT could not be verified` (other) | `realm-public.pem` stale — re-run §6 |
 | 401 at `:5000` fresh token | issuer mismatch — `iss` must be `http://localhost:8083/realms/openhie` |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.ps1` (§7) |
