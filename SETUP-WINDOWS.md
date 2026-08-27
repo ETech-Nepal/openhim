@@ -267,16 +267,40 @@ curl.exe http://202.51.71.81:50000/JeMPI/countRecords
 # {"goldenRecords":85,"interactions":85}
 ```
 
-Point both mediators at it (§1):
+Point both mediators at it (§1). Both `mediator\.env` **and**
+`admin-mediator\.env` need `JEMPI_BASE_URL` — missing one is the usual cause of
+the `502` in §8. This sets both, whether the key is stale, absent, or already
+correct:
+
+```powershell
+$JEMPI = 'http://202.51.71.81:50000/JeMPI'
+foreach ($f in '.\mediator\.env', '.\admin-mediator\.env') {
+  $c = Get-Content -Raw -LiteralPath $f
+  $c = if ($c -match '(?m)^JEMPI_BASE_URL=') { $c -replace '(?m)^JEMPI_BASE_URL=.*$', "JEMPI_BASE_URL=$JEMPI" }
+       else { $c.TrimEnd() + "`nJEMPI_BASE_URL=$JEMPI" }
+  # WriteAllText, not Set-Content: Set-Content would rewrite the whole file CRLF
+  [IO.File]::WriteAllText((Resolve-Path $f), (($c.TrimEnd() -replace "`r`n", "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+  "{0} -> {1}" -f (Split-Path $f -Parent | Split-Path -Leaf), (Select-String -Path $f -Pattern '^JEMPI_BASE_URL=').Line
+}
+```
+
+Expected output:
 
 ```
-JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI
+mediator -> JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI
+admin-mediator -> JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI
 ```
 
-in `mediator\.env` **and** `admin-mediator\.env`, then:
+Then apply it — `restart` does **not** re-read `.env`, so it must be
+`--force-recreate`:
 
 ```powershell
 docker compose up -d --force-recreate mediator admin-mediator
+
+# the containers must agree — this is what actually takes effect
+docker exec mediator sh -c 'echo $JEMPI_BASE_URL'
+docker exec admin-mediator sh -c 'echo $JEMPI_BASE_URL'
+
 docker exec mediator wget -qO- http://202.51.71.81:50000/JeMPI/countRecords   # from inside the container
 ```
 
@@ -326,8 +350,12 @@ Admin Console <http://localhost:8083>, bootstrap admin `admin` / `admin`.
 (Invoke-RestMethod http://localhost:8083/realms/openhie/.well-known/openid-configuration).issuer
 ```
 
-If it prints `http://localhost:8083/realms/openhie`, the realm exists — go to
-§7. Otherwise:
+If it prints `http://localhost:8083/realms/openhie`, the realm exists — skip the
+realm creation below and continue at **§6**. Do **not** jump to §7: §6 is
+required even when the realm already exists, because `realm-public.pem` is
+created empty in §1b and only §6 fills it. Skipping it makes every call to
+`:5000` fail with 401 and `JWT could not be verified: secret or public key must
+be provided`. Otherwise:
 
 ```powershell
 pwsh -File .\keycloak\setup.ps1
