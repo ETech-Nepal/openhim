@@ -139,14 +139,9 @@ Roles that matter later: `mediator` and `fhir-intake-mediator` both bind to
 > `.env` is in `.gitignore`. Never commit one — they hold the OpenHIM root
 > password.
 
-To set the password in all four without opening an editor:
-
-```powershell
-foreach ($d in 'mediator','admin-mediator','patient-portal-mediator','fhir-intake-mediator') {
-  (Get-Content "$d\.env") -replace '^OPENHIM_PASSWORD=.*', 'OPENHIM_PASSWORD=<your-password>' |
-    Set-Content "$d\.env"
-}
-```
+Leave `OPENHIM_PASSWORD` **blank for now** — you set the root password in §3b and
+fill it into all four files in §3c. Until then the mediators crash-loop, which is
+expected (§2).
 
 ### 1b. Pre-create `openhim-config\realm-public.pem` — do not skip
 
@@ -224,8 +219,18 @@ docker compose logs --tail 50 mediator
 
 ### 3c. Propagate to mediators
 
-Set `OPENHIM_PASSWORD` in `mediator\.env`, `admin-mediator\.env`,
-`patient-portal-mediator\.env`, `fhir-intake-mediator\.env` (§1), then:
+Set `OPENHIM_PASSWORD` to the password you recorded in §3b, in all four `.env`
+files (`mediator`, `admin-mediator`, `patient-portal-mediator`,
+`fhir-intake-mediator`):
+
+```powershell
+foreach ($d in 'mediator','admin-mediator','patient-portal-mediator','fhir-intake-mediator') {
+  (Get-Content "$d\.env") -replace '^OPENHIM_PASSWORD=.*', 'OPENHIM_PASSWORD=<your-password>' |
+    Set-Content "$d\.env"
+}
+```
+
+Then force-recreate so the containers pick up the new value:
 
 ```powershell
 docker compose up -d --force-recreate mediator admin-mediator patient-portal-mediator fhir-intake-mediator
