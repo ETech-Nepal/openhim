@@ -50,3 +50,39 @@ Use it as `Authorization: Bearer <token>` against `https://localhost:5000/fhir/.
   [[cdrs-dump-script]] and `mediator/scripts/create-hip-client.js` — that
   client isn't created by `setup.sh` since it needs a real RSA keypair
   generated and registered by hand.
+
+## Windows (PowerShell)
+
+The `.sh` scripts need `jq`, `openssl`, `python3`, `fold` and `base64`, none of
+which ship with Windows. Each has a `.ps1` twin that does the same thing with
+the Keycloak Admin REST API and .NET crypto — no extra tooling, only PowerShell
+7.1+ (`pwsh`) and Docker Desktop. The two are interchangeable: keys and PEMs are
+written in the same formats, so a client created by one works with the other.
+
+| bash | PowerShell |
+| --- | --- |
+| `./keycloak/setup.sh` | `pwsh -File .\keycloak\setup.ps1` |
+| `./keycloak/extract-realm-pubkey.sh` | `pwsh -File .\keycloak\extract-realm-pubkey.ps1` |
+| `./keycloak/create-org.sh <nhfr> "<name>"` | `pwsh -File .\keycloak\create-org.ps1 <nhfr> "<name>"` |
+| `./keycloak/create-jwt-client.sh <client-id>` | `pwsh -File .\keycloak\create-jwt-client.ps1 <client-id>` |
+| `./keycloak/get-jwt-client-token.sh <client-id>` | `pwsh -File .\keycloak\get-jwt-client-token.ps1 <client-id>` |
+| `./keycloak/onboard-hospital.sh <nhfr> ["Name"]` | `pwsh -File .\keycloak\onboard-hospital.ps1 <nhfr> ["Name"]` |
+
+`_common.ps1` holds the shared helpers (admin login, REST wrapper, PEM/base64url,
+JWT claim reader) and is dot-sourced by the others — don't run it directly.
+
+Demo token without `jq`:
+
+```powershell
+(Invoke-RestMethod -Method Post -Uri 'http://localhost:8083/realms/openhie/protocol/openid-connect/token' `
+   -Body @{ grant_type='password'; client_id='demo-client'; username='demo'; password='demo123' }).access_token
+```
+
+Overrides via environment: `KEYCLOAK_URL` (default `http://localhost:8083`),
+`KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` (default `admin`/`admin`),
+plus `FHIR_BASE_URL` and `ACCESS_TOKEN` for `create-org.ps1`.
+
+Gotcha: if Docker Desktop started the stack before `realm-public.pem` existed, it
+created an empty **directory** at `openhim-config\realm-public.pem`.
+`extract-realm-pubkey.ps1` detects this and prints the fix (stop `openhim-core`,
+remove the directory, re-run, force-recreate).
