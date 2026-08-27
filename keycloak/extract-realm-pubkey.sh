@@ -5,6 +5,9 @@
 # Keycloak live, so it must be refreshed whenever the realm's keypair changes.
 set -euo pipefail
 REALM="${1:-openhie}"
+OUTPUT_DIR="$(dirname "$0")/../openhim-config"
+
+mkdir -p "$OUTPUT_DIR"
 
 KEY=$(curl -fsS "http://localhost:8083/realms/$REALM" | jq -r .public_key)
 
@@ -12,7 +15,7 @@ KEY=$(curl -fsS "http://localhost:8083/realms/$REALM" | jq -r .public_key)
   echo "-----BEGIN PUBLIC KEY-----"
   echo "$KEY" | fold -w64
   echo "-----END PUBLIC KEY-----"
-} > "$(dirname "$0")/../openhim-config/realm-public.pem"
+} > "$OUTPUT_DIR/realm-public.pem"
 
 echo "Wrote openhim-config/realm-public.pem for realm $REALM"
 echo "Now: docker compose up -d --force-recreate openhim-core"

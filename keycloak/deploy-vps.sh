@@ -77,8 +77,10 @@ for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; d
   fi
 done
 
-# realm public key is injected by SETUP §5; give the bind mount a real file so
-# openhim-core can start (JWT auth just fails until §5 runs).
+# Realm public key is injected by SETUP §5. Git does not retain the otherwise
+# empty directory because the generated PEM is ignored, so create it before
+# adding the placeholder bind-mount file. JWT auth fails until §5 runs.
+mkdir -p openhim-config
 [ -f openhim-config/realm-public.pem ] || { touch openhim-config/realm-public.pem; echo "made  openhim-config/realm-public.pem (placeholder)"; }
 
 # root .env for docker compose variable substitution (Caddy DOMAIN / VPS_IP)
