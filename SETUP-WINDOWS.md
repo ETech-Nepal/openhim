@@ -174,6 +174,15 @@ with `d`:
 Get-Item openhim-config\realm-public.pem | Select-Object Mode, Length, Name
 ```
 
+### 1c. Root `.env` — VPS only, skip it locally
+
+There is a fifth `.env`, in the repo root, read by `docker-compose.yml` itself
+(`DOMAIN`, `VPS_IP`, `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_ISSUER`). It exists to
+drive the Caddy profiles on a VPS and is covered in §10b. For a local run,
+**do not create it** — every variable has a `localhost` default baked into
+`docker-compose.yml`, and a half-filled root `.env` will point Keycloak and
+OpenHIM at an issuer your tokens do not carry.
+
 ---
 
 ## 2. Containers
@@ -186,6 +195,10 @@ docker compose ps
 Running: `hapi-db`, `mongo-db`, `openhim-core`, `openhim-console`, `fhir`,
 `keycloak`, `mediator`, `admin-mediator`, `patient-portal-mediator`,
 `fhir-intake-mediator`.
+
+`caddy` / `caddy-ip` are **not** in that list, and should not be: both sit behind
+Compose profiles (`vps` / `vps-ip`) and start only when you name one, which is a
+VPS deployment (§10). Locally you talk to the host ports directly.
 
 > **Never `docker compose down`** (wipes Keycloak's H2 store and with it the
 > realm). Use `docker compose stop` / `docker compose start`.
@@ -519,80 +532,245 @@ Invoke-RestMethod -Method Post -Uri 'https://localhost:5000/ingest' `
 
 ---
 
-## 10. Deploy on a VPS
+## 10. Deploy on a VPS — Caddy
 
-Steps 1–9 assume everything is on `localhost`. On a VPS the token issuer must
-match across Keycloak, OpenHIM, and every client, or all tokens 401. Let
-`<vps>` = the VPS public host or domain.
+Steps 1–9 assume everything is on `localhost`. On a VPS, `docker-compose.yml`
+ships **Caddy** as the public front door: it terminates TLS, obtains and renews
+Let's Encrypt certificates automatically, and reverse-proxies to Keycloak,
+OpenHIM Core and the Console over the internal Docker network.
 
-### 10a. Keycloak reachable + stable issuer
+Two Compose profiles, and Caddy starts only when one of them is named:
 
-`docker-compose.yml`, `keycloak` service:
+| Profile | Service | Front door | Use |
+|---|---|---|---|
+| `vps` | `caddy` | `:80` + `:443`, real HTTPS on subdomains of `$DOMAIN` | the real deployment |
+| `vps-ip` | `caddy-ip` | `:80`, **plain HTTP**, Keycloak only | short trusted-network test |
+| *(none)* | — | direct host ports, as in §1–9 | local development |
 
-- Port: `127.0.0.1:8083:8080` → `8083:8080`.
-- Add env: `KC_HOSTNAME: https://<vps>:8083` (or the proxy URL from 10d).
-- `start-dev` is fine for testing. For production also set
-  `KC_DB: postgres` + DB env and drop `--import-realm`; `start-dev`'s H2 store
-  is lost on any `docker compose down`.
+Because both are profile-gated, a plain `docker compose up -d` (§2) never starts
+Caddy — local behaviour is unchanged, and **nothing in `docker-compose.yml` needs
+editing** for either profile except the Console env in 10e. Everything else is
+driven by a **root `.env`** (10b).
 
-### 10b. Point OpenHIM + clients at that issuer
+> The stack itself normally runs on a Linux VPS. Every Compose command below is
+> identical under `bash`; the `pwsh -File .\keycloak\*.ps1` calls become their
+> `./keycloak/*.sh` twins.
 
-- `docker-compose.yml`, `openhim-core`:
-  `authentication_jwt_issuer: "https://<vps>:8083/realms/openhie"`.
-- `FHIR_mediator/.env` (each hospital box): `KEYCLOAK_URL=https://<vps>:8083`.
-- `iss` in a minted token = Keycloak's `KC_HOSTNAME`. All three must be
-  byte-identical.
+### 10a. DNS first
+
+With `$DOMAIN` = `example.org`, `Caddyfile` serves four names:
+
+| Public URL | Proxies to | For |
+|---|---|---|
+| `https://keycloak.example.org` | `keycloak:8080` | token endpoint + admin console |
+| `https://openhim.example.org` | `openhim-core:5001` | **client traffic** — `/fhir`, `/ingest` |
+| `https://api.example.org` | `openhim-core:8080` (self-signed, skipped inside) | Core API, used by the Console |
+| `https://console.example.org` | `openhim-console:80` | OpenHIM Console UI |
+
+Create an **A record for each of the four**, pointing at the VPS public IP, and
+let them resolve **before** the first start. Caddy requests certificates on boot
+over HTTP-01; a name that does not resolve yet fails ACME, and repeated failures
+hit Let's Encrypt rate limits. Check from anywhere:
 
 ```powershell
-docker compose up -d --force-recreate keycloak openhim-core
+Resolve-DnsName keycloak.example.org, openhim.example.org, api.example.org, console.example.org
+```
+
+Note that `openhim.example.org` fronts port **5001**, the plain-HTTP transaction
+port (loopback-bound in Compose). Caddy is what puts TLS in front of it, so
+clients get a real certificate and no longer need `-k` /
+`-SkipCertificateCheck`. The self-signed `:5000` stays as it is for local and
+fallback use.
+
+### 10b. Root `.env`
+
+Create `.env` **in the repo root** (next to `docker-compose.yml`). It is
+gitignored — never commit it.
+
+```
+DOMAIN=example.org
+KEYCLOAK_PUBLIC_URL=https://keycloak.example.org
+KEYCLOAK_ISSUER=https://keycloak.example.org/realms/openhie
+```
+
+- `DOMAIN` must be the **bare zone** — no scheme, no subdomain, no trailing dot.
+  `Caddyfile` builds `keycloak.{$DOMAIN}` and the rest from it.
+- `KEYCLOAK_PUBLIC_URL` becomes Keycloak's `KC_HOSTNAME`, so it is the `iss` of
+  every token minted.
+- `KEYCLOAK_ISSUER` becomes OpenHIM's `authentication_jwt_issuer`.
+
+The last two must be identical apart from the `/realms/openhie` suffix, and
+clients must request tokens from that same host. Any mismatch and every request
+401s at the transaction port. Both variables default to `http://localhost:8083…`
+when unset, which is why §1–9 work untouched.
+
+`KC_PROXY_HEADERS: xforwarded` is already set on the `keycloak` service, so it
+trusts Caddy's `X-Forwarded-*` headers and builds `https://` URLs.
+
+### 10c. Change the secrets before the first public start
+
+Caddy publishes the Keycloak **admin console** at `https://keycloak.<domain>`
+and the OpenHIM **Core API** at `https://api.<domain>`. Both are reachable from
+the internet the moment the profile starts, so do this first:
+
+- `KC_BOOTSTRAP_ADMIN_PASSWORD` in `docker-compose.yml` (ships as `admin`).
+- OpenHIM root password (§3b) → propagate to all four `*/.env` (§3c).
+- Production: `hapi-db` and `mongo-db` credentials too.
+
+### 10d. Start the profile
+
+```powershell
+docker compose --profile vps up -d
+docker compose ps
+docker compose logs -f caddy       # watch certificate issuance
+```
+
+Successful issuance logs `certificate obtained successfully` once per name.
+`caddy` must appear in `docker compose ps`; if it is missing you omitted
+`--profile vps`.
+
+Certificates live in the `caddy-data` volume and survive `stop` / `start` and
+container recreation — they are lost only to `docker compose down -v` (§11).
+
+Every later Compose command that should keep Caddy running needs the flag too:
+
+```powershell
+docker compose --profile vps stop
+docker compose --profile vps start
+docker compose --profile vps up -d --force-recreate keycloak openhim-core
+```
+
+### 10e. Point the Console at the public API
+
+The Console is a browser app: it calls the Core API **from the user's browser**,
+not over the Docker network, so it has to be told the public API address.
+`docker-compose.yml` carries a commented `openhim-console` block with the shape
+— set it on the live service for the `vps` profile:
+
+```yaml
+    environment:
+      OPENHIM_CONSOLE_PROTOCOL: "https"
+      OPENHIM_CORE_MEDIATOR_HOSTNAME: "api.example.org"
+      OPENHIM_MEDIATOR_API_PORT: "443"
+```
+
+Then `docker compose --profile vps up -d --force-recreate openhim-console`. Left
+at the defaults, the Console loads at `https://console.example.org` but every
+API call fails — which looks like a login problem rather than a config problem.
+
+### 10f. Realm, key and onboarding on the VPS
+
+Keycloak's `8083` stays bound to `127.0.0.1`, so the onboarding scripts keep
+working **unchanged on the VPS itself** against `http://localhost:8083` — §5, §6
+and §7 as written. Only the *advertised* URLs change:
+
+```powershell
+(Invoke-RestMethod http://localhost:8083/realms/openhie/.well-known/openid-configuration).issuer
+# https://keycloak.example.org/realms/openhie   <- public issuer, even over loopback
+```
+
+That is correct: with `KC_HOSTNAME` set, Keycloak advertises and stamps the
+public issuer no matter which interface the request arrived on. It must match
+`KEYCLOAK_ISSUER` exactly.
+
+After changing `.env`, re-extract the realm key and recreate the dependants:
+
+```powershell
+docker compose --profile vps up -d --force-recreate keycloak openhim-core
 pwsh -File .\keycloak\extract-realm-pubkey.ps1
-docker compose up -d --force-recreate openhim-core
+docker compose --profile vps up -d --force-recreate openhim-core
 docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
 ```
 
-### 10c. Firewall
+From an admin machine **outside** the VPS, point the scripts at the public host:
 
-Expose only:
+```powershell
+$env:KEYCLOAK_URL = 'https://keycloak.example.org'
+pwsh -File .\keycloak\onboard-hospital.ps1 3130400221 "Bharatpur Hospital"
+```
 
-| Port | Service |
-|---|---|
-| 5000 | OpenHIM secure transaction port (client traffic) |
-| 8083 | Keycloak |
-| 9000 | OpenHIM Console — VPN / admin IP only |
+### 10g. Firewall
 
-Keep internal (no host rule): `8080` OpenHIM API, `8081` HAPI, `5433` hapi-db,
-`27017` mongo.
+With the `vps` profile, only Caddy needs to be reachable:
 
-JeMPI `50000` is deliberately published on the JeMPI VPS (§4) — restrict it to
-the OpenHIM host's IP rather than leaving it open to the world.
+| Port | Protocol | Purpose | Access |
+|---|---|---|---|
+| `22` | TCP | SSH | admin IP / VPN only |
+| `80` | TCP | ACME HTTP-01 + redirect to HTTPS | public (required) |
+| `443` | TCP | Caddy — all four subdomains | public |
 
-### 10d. TLS
+**Close everything else at the host firewall.** This matters: Compose still
+publishes `5000` (transaction), `8080` (Core API) and `9000` (Console) on *all*
+interfaces, and Caddy does not take them away. The host firewall is the only
+thing keeping them off the internet; their TLS-terminated equivalents are
+`openhim.`, `api.` and `console.<domain>` on 443.
 
-- Testing: `:5000` is already TLS with a self-signed cert. Clients keep
-  `curl.exe -k` / `Invoke-RestMethod -SkipCertificateCheck` /
-  `OPENHIM_TRUST_SELF_SIGNED=true`.
-- Production: put Caddy or nginx with a real cert in front of `:5000` and
-  `:8083`; set `KC_HOSTNAME` / `authentication_jwt_issuer` to the proxy URL.
+Already loopback-only in Compose, so they need no rule: `5001`, `8081`, `8083`.
+Never publish `5432`, `27017`, or the mediator ports.
 
-### 10e. Secrets
+JeMPI `50000` is published on the *JeMPI* VPS (§4) — restrict it there to the
+OpenHIM host's IP rather than leaving it open to the world.
 
-Change before exposing the host:
+### 10h. Client traffic through Caddy
 
-- Keycloak `KC_BOOTSTRAP_ADMIN_PASSWORD` (was `admin`).
-- OpenHIM root password (§3b) → propagate to every `*/.env` (§3c).
-- Production: `hapi-db` and `mongo-db` credentials too.
+Tokens and transactions both go to the public names, and — unlike §8 — no
+certificate-skipping flag is needed:
 
-### 10f. JeMPI from the VPS
+```powershell
+$env:KEYCLOAK_URL = 'https://keycloak.example.org'
+$TOKEN = & .\keycloak\get-jwt-client-token.ps1 3130400221
 
-With the `:50000` port forward in place (§4) there is nothing to set up — the
-VPS reaches `http://202.51.71.81:50000/JeMPI` directly. Only if you fall back to
-the tunnel do you need §4a on the VPS: `wg-quick up wg0`, `ip_forward`, and the
-`MASQUERADE` rule, or the mediators cannot reach `10.8.0.1:50000`.
+$body = @'
+{"resourceType":"Patient","name":[{"family":"SHRESTHA","given":["KAMANA"]}],
+ "gender":"female","birthDate":"2001-06-25"}
+'@
 
-### 10g. Never `docker compose down`
+Invoke-RestMethod -Method Post -Uri 'https://openhim.example.org/fhir/Patient' `
+  -Headers @{ Authorization = "Bearer $TOKEN" } `
+  -ContentType 'application/fhir+json' -Body $body
+```
 
-Same rule as local — wipes Keycloak's H2 realm. Use `stop` / `start`. A VPS you
-depend on should be on `KC_DB=postgres` (10a) so this stops being fragile.
+`/ingest` (§9) is the same host: `https://openhim.example.org/ingest`. On each
+hospital box, `FHIR_mediator/.env` gets
+`KEYCLOAK_URL=https://keycloak.example.org` plus that base URL.
+
+### 10i. Raw-IP test profile (`vps-ip`)
+
+For a short test on a trusted network or over WireGuard, before DNS exists.
+`caddy-ip` puts Keycloak on `http://<vps-ip>` — **plain HTTP**, so credentials
+and tokens are unprotected. Do not use it with real credentials or patient data.
+
+Root `.env`:
+
+```
+VPS_IP=203.0.113.10
+KEYCLOAK_PUBLIC_URL=http://203.0.113.10
+KEYCLOAK_ISSUER=http://203.0.113.10/realms/openhie
+```
+
+```powershell
+docker compose --profile vps-ip up -d
+```
+
+Only Keycloak is fronted here. OpenHIM keeps its direct ports, so transaction
+tests still go to `https://<vps-ip>:5000` with the self-signed cert
+(`-SkipCertificateCheck`), and `5000` / `9000` must be opened to the test clients
+— admin IPs only. Run **one** profile at a time: both Caddy services claim
+port 80.
+
+Move to the `vps` profile (10a–10h) before anything real touches the stack.
+
+### 10j. JeMPI and Keycloak persistence
+
+- **JeMPI:** with the `:50000` port forward (§4) the VPS reaches
+  `http://202.51.71.81:50000/JeMPI` directly — nothing to set up. Only the
+  tunnel fallback needs §4a on the VPS (`wg-quick up wg0`, `ip_forward`, the
+  `MASQUERADE` rule).
+- **Never `docker compose down`** — same rule as local: it wipes Keycloak's H2
+  realm, and `-v` additionally destroys Caddy's certificates. Use
+  `--profile vps stop` / `start`. A VPS you depend on should run Keycloak on
+  `KC_DB: postgres` (and drop `--import-realm`) so this stops being fragile;
+  `start-dev` is testing-grade only.
 
 ---
 
@@ -620,6 +798,7 @@ What survives on disk versus what you must redo:
 | OpenHIM clients, channels, transactions | gone — §7 recreates the clients |
 | HAPI Patients / Encounters / Organizations | gone — §7 recreates the Organizations |
 | JeMPI golden records | **untouched** — JeMPI is on the remote VPS, not in this stack |
+| Caddy certificates (`caddy-data`, VPS only) | gone — Caddy re-requests them on the next `--profile vps up`, so make sure DNS still resolves (§10a) before repeating a wipe; Let's Encrypt rate-limits repeated issuance for the same names |
 
 Then run, in order: **§2** → **§3b** and **§3c** (root password is back to
 `openhim-password`, so it must be reset and re-propagated) → **§5** → **§6** →
@@ -644,6 +823,9 @@ Then run, in order: **§2** → **§3b** and **§3c** (root password is back to
 | Create the `.env` files | `Copy-Item <svc>\.env.example <svc>\.env` (§1a) |
 | Pre-create the key file | `New-Item -ItemType File openhim-config\realm-public.pem` (§1b) |
 | Bring the stack up | `docker compose up -d` |
+| Bring it up on a VPS, behind Caddy | `docker compose --profile vps up -d` (§10) |
+| Raw-IP test front door (HTTP) | `docker compose --profile vps-ip up -d` (§10i) |
+| Watch certificate issuance | `docker compose logs -f caddy` |
 | Full reset | `docker compose down -v --rmi all` (§11) |
 | Reload a changed `.env` | `docker compose up -d --force-recreate <svc>` |
 | Create the realm | `pwsh -File .\keycloak\setup.ps1` |
@@ -677,7 +859,12 @@ directly.
 | `realm-public.pem` is a directory | Docker created it as a mount target before §1b ran — recovery block in §6 |
 | everything 401s right after a rebuild | new realm = new RSA key, and `realm-public.pem` is stale — re-run §6 (§11) |
 | `JWT could not be verified` (other) | `realm-public.pem` stale — re-run §6 |
-| 401 at `:5000` fresh token | issuer mismatch — `iss` must be `http://localhost:8083/realms/openhie` |
+| 401 at `:5000` fresh token | issuer mismatch — `iss` must equal `authentication_jwt_issuer` (`http://localhost:8083/realms/openhie` locally; on a VPS, `KEYCLOAK_PUBLIC_URL` / `KEYCLOAK_ISSUER` in the root `.env`, §10b) |
+| `caddy` missing from `docker compose ps` | the profile flag was omitted — `docker compose --profile vps up -d` (§10d) |
+| Caddy logs ACME / `obtain certificate` failures | the name does not resolve to this host yet, or `:80` is blocked — fix DNS and the firewall (§10a, §10g) |
+| Caddy container exits immediately on a VPS | `DOMAIN` (or `VPS_IP` for `vps-ip`) is unset in the **root** `.env` (§10b) |
+| `address already in use` on `:80` starting Caddy | both profiles were started — run only `vps` **or** `vps-ip` (§10i) |
+| Console loads at `console.<domain>` but every action fails | Console still pointed at the default API host — set the `openhim-console` env (§10e) |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.ps1` (§7) |
 | 404 at `:5000/ingest` | `NP FHIR Intake` channel missing — check `fhir-intake-mediator` |
 | 403 at `:5000/ingest` | set `OPENHIM_CHANNEL_ROLE=np-fhir-clients` on `fhir-intake-mediator` |
