@@ -1,0 +1,57 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:747128126",
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [
+          { "system": "http://mohp.gov.np/fhir/NamingSystem/nepal-health-id", "value": "747128126" }
+        ],
+        "name": [{ "use": "official", "family": "SHRESTHA", "given": ["KAMANA"] }],
+        "gender": "female",
+        "birthDate": "2001-06-25"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Patient",
+        "ifNoneExist": "identifier=http://mohp.gov.np/fhir/NamingSystem/nepal-health-id|747128126"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:enc-1",
+      "resource": {
+        "resourceType": "Encounter",
+        "status": "finished",
+        "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+        "subject": { "reference": "urn:uuid:747128126" },
+        "identifier": [
+          { "system": "http://mohp.gov.np/fhir/NamingSystem/encounter-number", "value": "ENC-0001" }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Encounter",
+        "ifNoneExist": "identifier=http://mohp.gov.np/fhir/NamingSystem/encounter-number|ENC-0001"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:enc-2",
+      "resource": {
+        "resourceType": "Encounter",
+        "status": "finished",
+        "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+        "subject": { "reference": "urn:uuid:747128126" },
+        "identifier": [
+          { "system": "http://mohp.gov.np/fhir/NamingSystem/encounter-number", "value": "ENC-0002" }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Encounter",
+        "ifNoneExist": "identifier=http://mohp.gov.np/fhir/NamingSystem/encounter-number|ENC-0002"
+      }
+    }
+  ]
+}

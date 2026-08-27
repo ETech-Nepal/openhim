@@ -1,0 +1,8 @@
+node_modules
+package-lock.json
+.env
+*.codex
+keycloak/keys/
+docs
+*.pem
+*.db

@@ -1,0 +1,29 @@
+{
+  "realm": "openhie",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "demo-client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "enabled": true,
+      "email": "demo@example.com",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "requiredActions": [],
+      "credentials": [
+        { "type": "password", "value": "demo123", "temporary": false }
+      ]
+    }
+  ]
+}

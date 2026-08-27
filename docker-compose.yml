@@ -1,0 +1,298 @@
+name: openhim
+
+networks:
+  openhim:
+
+volumes:
+  mongo-data:
+  hapi-db-data:
+  keycloak-data:
+
+services:
+  hapi-db:
+    container_name: hapi-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - openhim
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    # No host port. Only the fhir container needs Postgres, and it reaches it as
+    # hapi-db:5432 on the internal network. Publishing 5433 exposed the DB
+    # unauthenticated to the LAN. Re-add "5433:5432" temporarily for local debugging only.
+    volumes:
+      - hapi-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d hapi || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  mongo-db:
+    container_name: mongo-db
+    image: mongo:4.0
+    networks:
+      - openhim
+    volumes:
+      - "mongo-data:/data/db"
+    restart: unless-stopped
+
+  # ── Keycloak — issues the RS256 JWTs OpenHIM verifies on the transaction ports
+  # (5000/5001). Data persisted in the keycloak-data volume so the realm survives
+  # container recreation — the earlier bare `docker run` setup lost its realm on
+  # every restart. `--import-realm` additionally auto-creates the `openhie` realm
+  # + a baseline `demo-client`/`demo` user from realm-export.json on every boot IF
+  # the realm doesn't already exist — a safety net for "docker compose down wiped
+  # the realm again" (see DEMO.md), so there's always at least one working client
+  # without needing to remember to run keycloak/setup.sh. Hospital clients
+  # (keycloak/create-jwt-client.sh) still need re-creating after a real wipe —
+  # this only guarantees the demo-client baseline, not the full hospital roster.
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:26.7.2
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    # Bound to 8083 on localhost only — matches authentication_jwt_issuer below.
+    # Keycloak 26 has no /auth prefix.
+    ports:
+      - "127.0.0.1:8083:8080"
+    networks:
+      - openhim
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      # No curl/wget in this image — use bash's /dev/tcp instead. /health/ready
+      # needs --health-enabled (not on by default in start-dev), so this just
+      # confirms something is listening on 8080, not a full readiness check.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  openhim-core:
+    container_name: openhim-core
+    image: jembi/openhim-core:latest
+    restart: unless-stopped
+    environment:
+      mongo_url: "mongodb://mongo-db/openhim-development"
+      mongo_atnaUrl: "mongodb://mongo-db/openhim-development"
+      NODE_ENV: "development"
+      # Enable Basic auth for clients and other auth modes for later experimentation
+      api_authenticationTypes: '["local","basic","token","openid"]'
+      # ── Keycloak JWT client authentication (transaction layer, ports 5000/5001) ──
+      # Clients present a Keycloak-issued RS256 token as `Authorization: Bearer <jwt>`.
+      # OpenHIM verifies it with the realm public key below (no runtime call to Keycloak),
+      # then maps the token's `sub` claim to a registered OpenHIM Client.
+      authentication_enableJWTAuthentication: "true"
+      # NOTE: OpenHIM does algorithms.split(' ') / audience.split(' ') — these must be
+      # plain, space-separated strings, NOT JSON arrays. '["RS256"]' would break verification.
+      authentication_jwt_algorithms: "RS256"
+      authentication_jwt_issuer: "http://localhost:8083/realms/openhie"
+      authentication_jwt_audience: "account"
+      # authentication_jwt_secretOrPublicKey is NOT set inline. It is injected at boot
+      # from the mounted realm-public.pem (see entrypoint below), so the Keycloak realm
+      # public key lives in exactly one file. To rotate it, replace that one .pem.
+    # Wrap the image's default entrypoint: export the key from the mounted file, then
+    # hand off to the original docker-entrypoint.sh + CMD (node lib/server.js).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export authentication_jwt_secretOrPublicKey="$(cat /etc/openhim/realm-public.pem)"; exec docker-entrypoint.sh node lib/server.js
+    volumes:
+      - ./openhim-config/realm-public.pem:/etc/openhim/realm-public.pem:ro
+    ports:
+      - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
+      - "5000:5000"   # Secure transaction port (HTTPS)
+      - "5001:5001"   # Non-secure transaction port (HTTP)
+    networks:
+      - openhim
+    healthcheck:
+      test: "curl -sSk https://openhim-core:8080/heartbeat || exit 1"
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    depends_on:
+      - mongo-db
+
+  openhim-console:
+    container_name: openhim-console
+    image: organsushi/medisha-him:latest
+    restart: unless-stopped
+    networks:
+      - openhim
+    ports:
+      - "9000:80"
+    healthcheck:
+      test: "curl -sS http://openhim-console || exit 1"
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    depends_on:
+      - openhim-core
+
+  # openhim-console:
+  #   container_name: openhim-console
+  #   image: organsushi/medisha-him:latest
+  #   restart: unless-stopped
+  #   networks:
+  #     - openhim
+  #   environment:
+  #     OPENHIM_CONSOLE_PROTOCOL: "https"
+  #     OPENHIM_CORE_MEDIATOR_HOSTNAME: "202.51.71.81"
+  #     OPENHIM_MEDIATOR_API_PORT: "8080"
+  #     OPENHIM_CONSOLE_HOSTPATH: ""
+  #     OPENHIM_CONSOLE_SHOW_LOGIN: "true"
+  #     OPENHIM_MEDIATOR_HEALTH_WARNING_TIMEOUT: "60"
+  #     OPENHIM_MEDIATOR_HEALTH_DANGER_TIMEOUT: "120"
+  #   ports:
+  #     - "9000:80"
+  #   healthcheck:
+  #     test: "curl -sS http://openhim-console || exit 1"
+  #     interval: 30s
+  #     timeout: 30s
+  #     retries: 3
+  #   depends_on:
+  #     - openhim-core
+
+  fhir:
+    container_name: fhir
+    image: hapiproject/hapi:latest
+    restart: unless-stopped
+    networks:
+      - openhim
+    depends_on:
+      hapi-db:
+        condition: service_healthy
+    # TEMP (demo): HAPI Tester UI exposed for end-to-end proof — search Patient by
+    # bima-insurance-number, show the generated Health ID + linked Encounter.
+    # REVERT after the demo: this is unauthenticated read/write on the FHIR store.
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./hapi-config/application.yaml:/app/config/application.yaml:ro
+      - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/fhir/metadata || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+
+  # ── FHIR MPI Orchestrator mediator ──
+  # Runs in Docker on the `openhim` network. OpenHIM reaches it at mediator:4000
+  # (the channel route host, see MEDIATOR_ROUTE_HOST in mediator/.env). It
+  # self-registers its role + channel with OpenHIM on startup.
+  # See FHIR_MEDIATOR_IMPLEMENTATION.md and mediator/README.md.
+  mediator:
+    container_name: mediator
+    build:
+      context: ./mediator
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./mediator:/app"
+      - "/app/node_modules"
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./mediator/.env
+    # No host port. OpenHIM reaches it at mediator:4000 internally. The mediator has
+    # no auth of its own — it trusts OpenHIM's channel/role check — so a published
+    # port lets anyone write to the FHIR store bypassing auth. Debug-only: "4000:4000".
+    depends_on:
+      - "openhim-core"
+      - "fhir"
+
+  # ── FHIR Intake mediator ──
+  # Owns the /ingest channel: accepts raw CDRS encounter JSON (application/json) or
+  # supported FHIR JSON (application/fhir+json) and pushes both through the FHIR MPI
+  # Orchestrator above (reached at mediator:4000 on the openhim network). It derives
+  # the NHFR facility from X-OpenHIM-ClientID and never trusts an inbound X-NHFR-ID.
+  # No host port — OpenHIM reaches it at fhir-intake-mediator:4003. See
+  # fhir-intake-mediator/README.md.
+  fhir-intake-mediator:
+    container_name: fhir-intake-mediator
+    build:
+      context: ./fhir-intake-mediator
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./fhir-intake-mediator:/app"
+      - "/app/node_modules"
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./fhir-intake-mediator/.env
+    depends_on:
+      openhim-core:
+        condition: service_started
+      mediator:
+        condition: service_started
+
+  # ── Patient Admin Review mediator ──
+  # Owns the /admin channel: the duplicate-patient review queue and the merge that
+  # resolves a pair in BOTH JeMPI and HAPI. OpenHIM reaches it at admin-mediator:4002.
+  #
+  # It exists because JeMPI's own review queue is always empty for us: the write-side
+  # mediator registers via crRegister (deterministic find-or-create), which never runs
+  # probabilistic linking and never emits notifications. This service finds near-miss
+  # duplicates itself and resolves them via JeMPI /relink. See admin-mediator/README.md.
+  #
+  # jempi-config is mounted read-only so the scorer reads the SAME m/u link weights
+  # JeMPI is deployed with, instead of a drifting copy.
+  admin-mediator:
+    container_name: admin-mediator
+    build:
+      context: ./admin-mediator
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./admin-mediator:/app"
+      - "/app/node_modules"
+      - "./jempi-config:/config:ro"
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./admin-mediator/.env
+    # No host port. OpenHIM reaches it at admin-mediator:4002 internally. CRITICAL:
+    # this mediator executes IRREVERSIBLE patient merges and has no auth of its own
+    # (relies entirely on OpenHIM's np-admin-clients role check). A published port
+    # let anyone merge patients unauthenticated AND with no transaction-log entry.
+    # Debug-only: "4002:4002".
+    depends_on:
+      hapi-db:
+        condition: service_healthy
+      openhim-core:
+        condition: service_started
+      fhir:
+        condition: service_started
+
+  # ── Patient Portal mediator (read-only) ──
+  # Dedicated mediator for the patient portal. Owns the /patient-portal channel,
+  # verifies the forwarded X-Patient-Token, and reads HAPI directly. OpenHIM
+  # reaches it at patient-portal-mediator:4001. See patient-portal-mediator/.
+  patient-portal-mediator:
+    container_name: patient-portal-mediator
+    build:
+      context: ./patient-portal-mediator
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./patient-portal-mediator:/app"
+      - "/app/node_modules"
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./patient-portal-mediator/.env
+    # No host port. OpenHIM reaches it at patient-portal-mediator:4001 internally.
+    # A published port bypasses the OpenHIM channel; the mediator's own
+    # X-Patient-Token check still applies, but /patient-portal/resolve is
+    # system-authed only. Debug-only: "4001:4001".
+    depends_on:
+      - "openhim-core"
+      - "fhir"
