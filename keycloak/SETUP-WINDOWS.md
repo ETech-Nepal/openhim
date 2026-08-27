@@ -384,6 +384,27 @@ Invoke-RestMethod -Method Post -Uri 'https://localhost:5000/fhir/Patient' `
 `201` with a UUID `id` and `nepal-health-id` in `identifier` = the full chain
 works. Console → **Transactions** → the request → **orchestrations**.
 
+> **Reading a failure.** On an error OpenHIM echoes **your request body back** as
+> the response body, and `Invoke-RestMethod` surfaces that as the exception
+> message — so a failed smoke test looks like it printed your own Patient JSON
+> back at you. That text tells you nothing; you need the status code and the
+> core log. Wrap the call to get both:
+>
+> ```powershell
+> try   { Invoke-WebRequest -Method Post -Uri 'https://localhost:5000/fhir/Patient' `
+>           -SkipCertificateCheck -Headers @{ Authorization = "Bearer $TOKEN" } `
+>           -ContentType 'application/fhir+json' -Body $body }
+> catch { "STATUS: $([int]$_.Exception.Response.StatusCode)"
+>         $_.ErrorDetails.Message }
+>
+> docker compose logs --tail 40 openhim-core
+> ```
+>
+> Then read the status against the §6 table (401 auth / 403 role / 404 channel).
+> Note `Invoke-WebRequest`'s `.Content` comes back as a **byte array** for
+> `application/fhir+json` — use `Invoke-RestMethod`, which parses it into an
+> object, once the call succeeds.
+
 Postman: `node keycloak\token-server.mjs`, then
 <http://localhost:4099/token/3130400221>.
 
@@ -559,13 +580,15 @@ directly.
 | Mediator missing under **Mediators** | `OPENHIM_PASSWORD` ≠ root password (3c) |
 | Mediator crash-loops on boot | `.env` missing or `OPENHIM_PASSWORD` blank (§1) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
-| `realm-public.pem` is a directory | Docker created it before §6 ran — delete it, re-run `extract-realm-pubkey.ps1` |
-| `JWT could not be verified` | `realm-public.pem` stale — re-run §6 |
+| a failed call "returns" your own request JSON | that is OpenHIM's error body, not a diagnosis — get the status code + `docker compose logs openhim-core` (§8) |
+| `JWT could not be verified: secret or public key must be provided` | OpenHIM has **no** key loaded — `realm-public.pem` is empty or a directory, see the next row |
+| `realm-public.pem` is a directory | Docker created it before §6 ran — `docker compose stop openhim-core`, `Remove-Item -Recurse openhim-config\realm-public.pem`, re-run `extract-realm-pubkey.ps1`, force-recreate |
+| `JWT could not be verified` (other) | `realm-public.pem` stale — re-run §6 |
 | 401 at `:5000` fresh token | issuer mismatch — `iss` must be `http://localhost:8083/realms/openhie` |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.ps1` (§7) |
 | 404 at `:5000/ingest` | `NP FHIR Intake` channel missing — check `fhir-intake-mediator` |
 | 403 at `:5000/ingest` | set `OPENHIM_CHANNEL_ROLE=np-fhir-clients` on `fhir-intake-mediator` |
 | 422 at `:5000/ingest` | no Organization with NHFR identifier `<nhfr-id>` — `create-org.ps1` (§7) |
 | `onboard-hospital.ps1` fails at 4/5 | Keycloak won't override `sub` — `FACILITY_REGISTRY_JSON` fallback (§7) |
-| Mediator can't reach JeMPI | `JEMPI_BASE_URL` still `10.8.0.1` — switch to `202.51.71.81:50000` (§4) |
+| `502` + `JeMPI register failed: timeout` | `JEMPI_BASE_URL` still `10.8.0.1` — switch to `202.51.71.81:50000` and force-recreate (§4) |
 | Keycloak realm gone after a stop | `docker compose down` was used — use `stop` / `start` |
