@@ -1,0 +1,9 @@
+# Test-only raw-IP reverse proxy for Keycloak.
+#
+# Docker Compose injects VPS_IP from the root .env file. This uses plain HTTP
+# intentionally: it is suitable only while all users are on a trusted test
+# network or VPN. For a real deployment, use Caddyfile with a DNS domain and
+# HTTPS instead.
+http://{$VPS_IP} {
+	reverse_proxy keycloak:8080
+}

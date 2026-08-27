@@ -8,7 +8,7 @@ set -euo pipefail
 
 CLIENT_ID="${1:?usage: get-jwt-client-token.sh <client-id>}"
 REALM=openhie
-KC_URL="http://localhost:8083"
+KC_URL="${KEYCLOAK_URL:-http://localhost:8083}"
 TOKEN_EP="$KC_URL/realms/$REALM/protocol/openid-connect/token"
 PRIV="$(dirname "$0")/keys/${CLIENT_ID}.key.pem"
 

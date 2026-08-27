@@ -1,14 +1,34 @@
 # Auth & Bring-up Setup
 
-Steps and commands only. Run from the repo root. `<like-this>` = placeholder.
+Local / single-host bring-up. Steps and commands only. Run from the repo root.
+`<like-this>` = placeholder.
 
 ---
 
-## 0. Prereqs
+## 0. Prerequisites
 
-- Docker + Docker Compose v2
-- `jq`, `curl`, `openssl`, `python3`, `wg` / `wg-quick`
+Install these first:
+
+- **Docker Engine + Compose v2** — <https://docs.docker.com/engine/install/>
+  (verify: `docker compose version`)
+- **Git** — <https://git-scm.com/downloads>
+- CLI tools: `jq`, `curl`, `openssl`, `python3`, `wg` / `wg-quick`
+  (Debian/Ubuntu: `sudo apt-get install -y jq curl openssl python3 wireguard`)
 - WireGuard config for the JeMPI VPS (`10.8.0.1`, peer `202.51.71.81`)
+
+Then get the code:
+
+```bash
+git clone https://github.com/ETech-Nepal/openhim.git openhie
+cd openhie
+for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+  cp $d/.env.example $d/.env
+done
+```
+
+The examples are preconfigured for the compose network. The only value you must
+edit for bring-up is `OPENHIM_PASSWORD` in all four — done in §2c, once you have
+the password from §2b.
 
 ---
 
@@ -55,22 +75,44 @@ Console → **Mediators**: all four green.
 
 ---
 
-## 3. WireGuard tunnel to JeMPI
+## 3. Reach JeMPI
+
+The mediator talks to JeMPI at `JEMPI_BASE_URL` in `mediator/.env`. Pick one.
+After changing it: `docker compose up -d --force-recreate mediator`.
+
+### Option A — JeMPI public IP (simplest)
 
 ```bash
-sudo wg-quick up wg0                                          # config at /etc/wireguard/wg0.conf
-curl http://10.8.0.1:50000/JeMPI/countRecords                 # from host
-docker exec mediator wget -qO- http://10.8.0.1:50000/JeMPI/countRecords   # from a container
+# mediator/.env
+JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI
 ```
 
-If host works but container hangs:
+Check: `curl http://202.51.71.81:50000/JeMPI/countRecords`
+
+No tunnel. Traffic crosses the public internet unencrypted (JeMPI has no
+TLS/auth of its own) — test data only; switch to Option B for real patient data.
+
+### Option B — WireGuard tunnel
+
+Keeps the default `JEMPI_BASE_URL=http://10.8.0.1:50000/JeMPI`.
+
+```bash
+sudo wg-quick up wg0                                    # config: /etc/wireguard/wg0.conf
+curl http://10.8.0.1:50000/JeMPI/countRecords           # from host
+docker exec mediator wget -qO- http://10.8.0.1:50000/JeMPI/countRecords
+```
+
+Host works but the container hangs — masquerade the docker subnet out `wg0`:
 
 ```bash
 sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o wg0 -j MASQUERADE
 sudo sysctl -w net.ipv4.ip_forward=1
 ```
 
-Also ensure `wg0.conf` `AllowedIPs` includes `10.8.0.0/24`.
+`wg0.conf` `AllowedIPs` must include `10.8.0.0/24`.
+
+> You can also run the tunnel **and** point `JEMPI_BASE_URL` at the public IP
+> `http://202.51.71.81:50000/JeMPI` — both reach the same JeMPI.
 
 ---
 
@@ -82,8 +124,10 @@ Admin Console <http://localhost:8083>, bootstrap admin `admin` / `admin`.
 curl -fsS http://localhost:8083/realms/openhie/.well-known/openid-configuration | jq .issuer
 ```
 
-If it prints `http://localhost:8083/realms/openhie`, the realm exists — go to §6.
-Otherwise:
+If it returns a non-empty issuer URL, the realm exists — go to §6. In the
+raw-IP profile (§9), that value is
+`http://<public-vps-ip>/realms/openhie`, even though this check runs through
+the VPS loopback port. Otherwise:
 
 - Realm dropdown → **Create realm** → name `openhie` → **Create**
 - Or `./keycloak/setup.sh`
@@ -191,11 +235,13 @@ Inbound `X-NHFR-ID` / `organization_id` ignored.
 
 ```bash
 cd FHIR_mediator
+python3 -m venv venv && venv/bin/pip install -r requirements.txt
 cp .env.example .env          # KEYCLOAK_CLIENT_ID=<nhfr-id>, PRIVATE_KEY_FILE, SQLITE_PATH
 
-DRY_RUN=1 python3 main.py      # preview
-python3 main.py                # raw rows
-python3 main.py --FHIR         # client-mapped Bundles
+DRY_RUN=1 venv/bin/python main.py      # preview
+venv/bin/python main.py                # raw rows
+venv/bin/python main.py --FHIR         # client-mapped Bundles
+venv/bin/python main.py --all          # also patients with no insurance number
 ```
 
 Progress bookmarked per `encounter_number`.
@@ -217,73 +263,67 @@ curl -k -sS -X POST https://localhost:5000/ingest \
 
 ---
 
-## 9. Deploy on a VPS
+## 9. VPS raw-IP test profile
 
-Steps 1–8 assume everything is on `localhost`. On a VPS the token issuer must
-match across Keycloak, OpenHIM, and every client, or all tokens 401. Let
-`<vps>` = the VPS public host or domain.
+Use this only for a short test on a trusted network or through WireGuard. It
+uses **plain HTTP** for Keycloak, so credentials and tokens are not protected
+on an untrusted network. Use the domain/Caddy HTTPS profile before handling
+real credentials or patient data.
 
-### 9a. Keycloak reachable + stable issuer
-
-`docker-compose.yml`, `keycloak` service:
-
-- Port: `127.0.0.1:8083:8080` → `8083:8080`.
-- Add env: `KC_HOSTNAME: https://<vps>:8083` (or the proxy URL from 9d).
-- `start-dev` is fine for testing. For production also set
-  `KC_DB: postgres` + DB env and drop `--import-realm`; `start-dev`'s H2 store
-  is lost on any `docker compose down`.
-
-### 9b. Point OpenHIM + clients at that issuer
-
-- `docker-compose.yml`, `openhim-core`:
-  `authentication_jwt_issuer: "https://<vps>:8083/realms/openhie"`.
-- `FHIR_mediator/.env` (each hospital box): `KEYCLOAK_URL=https://<vps>:8083`.
-- `iss` in a minted token = Keycloak's `KC_HOSTNAME`. All three must be byte-identical.
+Create root `.env` on the VPS:
 
 ```bash
-docker compose up -d --force-recreate keycloak openhim-core
-./keycloak/extract-realm-pubkey.sh
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
+VPS_IP=<public-vps-ip>
+KEYCLOAK_PUBLIC_URL=http://<public-vps-ip>
+KEYCLOAK_ISSUER=http://<public-vps-ip>/realms/openhie
 ```
 
-### 9c. Firewall
+Start the raw-IP profile:
 
-Expose only:
+```bash
+docker compose --profile vps-ip up -d --build
+docker compose ps
+```
 
-| Port | Service |
-|---|---|
-| 5000 | OpenHIM secure transaction port (client traffic) |
-| 8083 | Keycloak |
-| 9000 | OpenHIM Console — VPN / admin IP only |
+Keycloak is now reached at `http://<public-vps-ip>` through Caddy; the
+container's `8083` remains bound to `127.0.0.1` for VPS-local onboarding
+scripts. The configured Keycloak issuer and OpenHIM JWT issuer must both be
+`http://<public-vps-ip>/realms/openhie`.
 
-Keep internal (no host rule): `8080` OpenHIM API, `8081` HAPI, `5433` hapi-db,
-`27017` mongo, `50000` JeMPI.
+Open firewall access only as needed:
 
-### 9d. TLS
+| Port | Protocol | Purpose | Access |
+|---|---|---|---|
+| `22` | TCP | SSH | admin IP/VPN only |
+| `80` | TCP | Keycloak through Caddy | WireGuard/trusted test clients only |
+| `5000` | TCP | OpenHIM transaction endpoint | approved test client IPs |
+| `8080` | TCP | OpenHIM API | admin IP/VPN only |
+| `9000` | TCP | OpenHIM Console | admin IP/VPN only |
+| `<wg-port>` | UDP | WireGuard listener | WireGuard peers only |
 
-- Testing: `:5000` is already TLS with a self-signed cert. Clients keep `-k` /
-  `OPENHIM_TRUST_SELF_SIGNED=true`.
-- Production: put Caddy or nginx with a real cert in front of `:5000` and
-  `:8083`; set `KC_HOSTNAME` / `authentication_jwt_issuer` to the proxy URL.
+`5001`, `8081`, and `8083` are loopback-only in Compose; do not add firewall
+rules or broader port mappings for them. Do not publish `5432`, `27017`, or
+mediator ports.
 
-### 9e. Secrets
+For a hospital client token command running outside the VPS, set the public
+Keycloak address explicitly:
 
-Change before exposing the host:
+```bash
+KEYCLOAK_URL=http://<public-vps-ip> ./keycloak/get-jwt-client-token.sh <nhfr-id>
+```
 
-- Keycloak `KC_BOOTSTRAP_ADMIN_PASSWORD` (was `admin`).
-- OpenHIM root password (§2b) → propagate to every `*/​.env` (§2c).
-- Production: `hapi-db` and `mongo-db` credentials too.
+Use the same public IP for transaction smoke tests (OpenHIM's transaction
+port remains self-signed in this test profile):
 
-### 9f. JeMPI tunnel on the VPS
+```bash
+TOKEN=$(KEYCLOAK_URL=http://<public-vps-ip> ./keycloak/get-jwt-client-token.sh <nhfr-id>)
+curl -k -sS -X POST https://<public-vps-ip>:5000/fhir/Patient \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/fhir+json' \
+  -d '{"resourceType":"Patient","name":[{"family":"TEST"}],"gender":"unknown"}'
+```
 
-Run §3 on the VPS: `wg-quick up wg0`, `ip_forward`, the MASQUERADE rule.
-Without it the mediators cannot reach `10.8.0.1:50000`.
-
-### 9g. Never `docker compose down`
-
-Same rule as local — wipes Keycloak's H2 realm. Use `stop` / `start`. A VPS you
-depend on should be on `KC_DB=postgres` (9a) so this stops being fragile.
+Then continue with WireGuard/JeMPI in §3, OpenHIM password propagation in §2,
+realm key extraction in §5, and hospital onboarding in §6.
 
 ---
 
@@ -298,7 +338,7 @@ depend on should be on `KC_DB=postgres` (9a) so this stops being fragile.
 | Hospital token | `./keycloak/get-jwt-client-token.sh <nhfr-id>` |
 | Postman token helper | `node keycloak/token-server.mjs` (`:4099`) |
 | JeMPI tunnel up | `sudo wg-quick up wg0` |
-| Push data | `cd FHIR_mediator && python3 main.py` (`--FHIR` for bundles) |
+| Push data | `cd FHIR_mediator && venv/bin/python main.py` (`--FHIR`, `--all`) |
 
 ## Troubleshooting
 
@@ -308,7 +348,7 @@ depend on should be on `KC_DB=postgres` (9a) so this stops being fragile.
 | Mediator missing under **Mediators** | `OPENHIM_PASSWORD` ≠ root password (2c) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
 | `JWT could not be verified` | `realm-public.pem` stale — re-run §5 |
-| 401 at `:5000` fresh token | issuer mismatch — `iss` must be `http://localhost:8083/realms/openhie` |
+| 401 at `:5000` fresh token | issuer mismatch — `iss` must exactly match `KEYCLOAK_ISSUER` (`http://localhost:8083/realms/openhie` locally; see §9 on a VPS) |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.sh` (§6) |
 | 404 at `:5000/ingest` | `NP FHIR Intake` channel missing — check `fhir-intake-mediator` |
 | 403 at `:5000/ingest` | set `OPENHIM_CHANNEL_ROLE=np-fhir-clients` on `fhir-intake-mediator` |

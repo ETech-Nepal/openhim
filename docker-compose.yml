@@ -7,8 +7,62 @@ volumes:
   mongo-data:
   hapi-db-data:
   keycloak-data:
+  caddy-data:
+  caddy-config:
 
 services:
+  # ── Caddy — reverse proxy + automatic TLS. VPS only. Fronts keycloak,
+  # openhim-core (tx + API) and the console on subdomains of $DOMAIN (./.env).
+  # Locally it does nothing useful — leave $DOMAIN unset and the stack still
+  # runs on the direct host ports below. See Caddyfile + SETUP.md §9.
+  caddy:
+    container_name: caddy
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["vps"]
+    networks:
+      - openhim
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # `vps-ip` may be the active profile instead. Caddyfile itself needs a
+      # non-empty DOMAIN when this domain profile is started.
+      DOMAIN: "${DOMAIN:-}"
+    depends_on:
+      - openhim-core
+      - keycloak
+      - openhim-console
+
+  # ── Caddy — raw-IP test profile. ─────────────────────────────────────────
+  # Makes Keycloak reachable at http://<VPS_IP> while leaving its container
+  # port on loopback. This is deliberately HTTP-only for a short-lived test;
+  # do not use it with real credentials or patient data. The direct OpenHIM
+  # ports below retain their local/test mappings.
+  caddy-ip:
+    container_name: caddy-ip
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["vps-ip"]
+    networks:
+      - openhim
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile.ip:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # `vps` may be the active profile instead. Caddyfile.ip needs a non-empty
+      # VPS_IP when this raw-IP profile is started.
+      VPS_IP: "${VPS_IP:-}"
+    depends_on:
+      - keycloak
+
   hapi-db:
     container_name: hapi-db
     image: postgres:16-alpine
@@ -56,6 +110,11 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Defaults preserve local development. The raw-IP profile sets this to
+      # http://<VPS_IP>, matching the Caddy route in Caddyfile.ip.
+      KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8083}"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
     # Bound to 8083 on localhost only — matches authentication_jwt_issuer below.
     # Keycloak 26 has no /auth prefix.
     ports:
@@ -93,7 +152,7 @@ services:
       # NOTE: OpenHIM does algorithms.split(' ') / audience.split(' ') — these must be
       # plain, space-separated strings, NOT JSON arrays. '["RS256"]' would break verification.
       authentication_jwt_algorithms: "RS256"
-      authentication_jwt_issuer: "http://localhost:8083/realms/openhie"
+      authentication_jwt_issuer: "${KEYCLOAK_ISSUER:-http://localhost:8083/realms/openhie}"
       authentication_jwt_audience: "account"
       # authentication_jwt_secretOrPublicKey is NOT set inline. It is injected at boot
       # from the mounted realm-public.pem (see entrypoint below), so the Keycloak realm
@@ -109,7 +168,7 @@ services:
     ports:
       - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
       - "5000:5000"   # Secure transaction port (HTTPS)
-      - "5001:5001"   # Non-secure transaction port (HTTP)
+      - "127.0.0.1:5001:5001" # Non-secure transaction port (HTTP; local only)
     networks:
       - openhim
     healthcheck:
@@ -173,7 +232,7 @@ services:
     # bima-insurance-number, show the generated Health ID + linked Encounter.
     # REVERT after the demo: this is unauthenticated read/write on the FHIR store.
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
       - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro

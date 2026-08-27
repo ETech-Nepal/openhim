@@ -1,0 +1,27 @@
+# Reverse proxy + automatic TLS for the OpenHIE stack on a VPS.
+# $DOMAIN comes from ./.env (docker compose reads it; the caddy service passes
+# it through). DNS A records for keycloak / openhim / api / console subdomains
+# must point at this host before first start, or ACME fails.
+
+keycloak.{$DOMAIN} {
+	reverse_proxy keycloak:8080
+}
+
+# Client transaction traffic: /fhir, /ingest. Caddy terminates TLS; the
+# non-secure OpenHIM port 5001 is plain HTTP inside the docker network.
+openhim.{$DOMAIN} {
+	reverse_proxy openhim-core:5001
+}
+
+# OpenHIM Core API — HTTPS with a self-signed cert inside the container.
+api.{$DOMAIN} {
+	reverse_proxy https://openhim-core:8080 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+console.{$DOMAIN} {
+	reverse_proxy openhim-console:80
+}
