@@ -1,10 +1,10 @@
 // Nepal Health ID generation.
 //
-// The Health ID is a human-facing number a patient carries for life. It is
+// The Health ID is a human-facing identifier a patient carries for life. It is
 // generated *separately* from JeMPI's golden UID and mapped 1:1 to it (see
 // patient handler): the golden UID resolves *who* the person is, the Health ID
 // is the readable label. It deliberately encodes **no** patient data — it is an
-// opaque number + a Damm check digit so a mistyped ID can be rejected without a
+// opaque identifier + a Damm check digit so a mistyped ID can be rejected without a
 // database lookup.
 //
 // Damm (2004) catches every single-digit error and every adjacent
@@ -26,9 +26,27 @@ const T = [
   [2, 5, 8, 1, 4, 3, 6, 7, 9, 0],
 ];
 
-// Number of digits in the random base, before the check digit is appended.
-// Total Health ID length = BASE_DIGITS + 1.
-export const BASE_DIGITS = 10;
+// Newly issued visible format: LLDDDDDDC (two series letters, six random
+// digits, and a Damm check digit). Letters are mapped to decimal values only
+// for the Damm calculation; the visible identifier retains its letters.
+export const LEGACY_BASE_DIGITS = 10;
+export const SERIES_LETTERS = 2;
+export const RANDOM_DIGITS = 6;
+const NEW_BODY_RE = /^[A-Z]{2}\d{6}$/;
+const NEW_HEALTH_ID_RE = /^[A-Z]{2}\d{7}$/;
+const LEGACY_HEALTH_ID_RE = new RegExp(`^\\d{${LEGACY_BASE_DIGITS + 1}}$`);
+
+export function encodeHealthIdBody(body) {
+  if (typeof body !== 'string' || !NEW_BODY_RE.test(body)) {
+    throw new TypeError('Health ID body must be two uppercase letters followed by six digits');
+  }
+  const series = body.slice(0, SERIES_LETTERS);
+  const digits = body.slice(SERIES_LETTERS);
+  const encodedSeries = [...series]
+    .map(letter => String(letter.charCodeAt(0) - 65).padStart(2, '0'))
+    .join('');
+  return encodedSeries + digits;
+}
 
 /**
  * Damm check digit for a numeric string body.
@@ -56,27 +74,33 @@ export function dammValid(num) {
   return interim === 0;
 }
 
-/** True when `value` is an all-digit string of the expected length with a valid Damm digit. */
+/** True when `value` is a valid newly issued or legacy Health ID. */
 export function isValidHealthId(value) {
   if (typeof value !== 'string') return false;
-  if (!new RegExp(`^\\d{${BASE_DIGITS + 1}}$`).test(value)) return false;
-  return dammValid(value);
+  if (NEW_HEALTH_ID_RE.test(value)) {
+    const body = value.slice(0, -1);
+    return dammValid(encodeHealthIdBody(body) + value.at(-1));
+  }
+  return LEGACY_HEALTH_ID_RE.test(value) && dammValid(value);
 }
 
-// Random base whose first digit is 1-9 (fixed length, no leading zero).
-function randomBase() {
-  let s = String(1 + Math.floor(Math.random() * 9)); // first digit 1-9
-  for (let i = 1; i < BASE_DIGITS; i++) {
-    s += String(Math.floor(Math.random() * 10));
-  }
-  return s;
+function randomSeries() {
+  return Array.from({ length: SERIES_LETTERS }, () =>
+    String.fromCharCode(65 + Math.floor(Math.random() * 26)),
+  ).join('');
+}
+
+function randomDigits() {
+  let value = '';
+  for (let i = 0; i < RANDOM_DIGITS; i++) value += Math.floor(Math.random() * 10);
+  return value;
 }
 
 /**
- * Mint a fresh Nepal Health ID: a random opaque base + Damm check digit.
- * @returns {string} an (BASE_DIGITS + 1)-digit numeric string
+ * Mint a fresh Nepal Health ID: a random visible body + Damm check digit.
+ * @returns {string} an LLDDDDDDC identifier
  */
 export function generateHealthId() {
-  const base = randomBase();
-  return base + String(dammCheck(base));
+  const body = randomSeries() + randomDigits();
+  return body + String(dammCheck(encodeHealthIdBody(body)));
 }

@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "test": "node --test test",
     "test:jempi": "node scripts/test-jempi.js"
   },
   "dependencies": {
