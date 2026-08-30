@@ -25,3 +25,10 @@ api.{$DOMAIN} {
 console.{$DOMAIN} {
 	reverse_proxy openhim-console:80
 }
+
+# TEMP (demo): HAPI Tester UI. Unauthenticated read/write on the raw FHIR
+# store — bypasses OpenHIM entirely. REVERT after the demo (drop this block,
+# re-pin fhir's port to 127.0.0.1 in docker-compose.yml).
+fhir.{$DOMAIN} {
+	reverse_proxy fhir:8080
+}

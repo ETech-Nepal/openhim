@@ -1,6 +1,6 @@
 ---
-title: "Nepal Health ID (HID) — Generation & Resolution Flow"
-subtitle: "How the HID is minted, how JeMPI resolves it, and what happens on dedup, re-registration, read-back and merge"
+title: 'Nepal Health ID (HID) — Generation & Resolution Flow'
+subtitle: 'How the HID is minted, how JeMPI resolves it, and what happens on dedup, re-registration, read-back and merge'
 date: 2026-08-28
 ---
 
@@ -10,10 +10,10 @@ date: 2026-08-28
 
 Every patient carries **two** identifiers, mapped 1:1:
 
-| Identifier | System URI | Made by | Role |
-|---|---|---|---|
-| **Nepal Health ID** ("HID") | `http://mohp.gov.np/fhir/NamingSystem/nepal-health-id` | the mediator — `mediator/src/fhir/healthId.js` `generateHealthId()` | human-facing lifetime number; also the key for the HAPI conditional upsert |
-| **JeMPI golden UID** | `http://mohp.gov.np/fhir/NamingSystem/jempi-golden-uid` | JeMPI — returned by `POST /crRegister` | machine-side cross-source dedup key (a Dgraph hex id, e.g. `0x51`) |
+| Identifier                  | System URI                                              | Made by                                                             | Role                                                                       |
+| --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **Nepal Health ID** ("HID") | `http://mohp.gov.np/fhir/NamingSystem/nepal-health-id`  | the mediator — `mediator/src/fhir/healthId.js` `generateHealthId()` | human-facing lifetime number; also the key for the HAPI conditional upsert |
+| **JeMPI golden UID**        | `http://mohp.gov.np/fhir/NamingSystem/jempi-golden-uid` | JeMPI — returned by `POST /crRegister`                              | machine-side cross-source dedup key (a Dgraph hex id, e.g. `0x51`)         |
 
 > **The mediator mints the HID; JeMPI only stores it** (as the golden record's
 > `auxId`) so it round-trips on re-registration. The 1:1 mapping is maintained by
@@ -24,35 +24,35 @@ Every patient carries **two** identifiers, mapped 1:1:
 
 Source: `mediator/src/fhir/healthId.js`.
 
-- **10 random digits**, first digit 1–9 (`randomBase()`), then
+- **2 random series letters** (`randomSeries()`, A–Z) + **6 random digits**
+  (`randomDigits()`) = the 8-char body, then
 - **+1 Damm check digit** (`dammCheck()` — a 10×10 totally anti-symmetric
-  quasigroup table). Total length **11**.
+  quasigroup table), computed over the body with letters mapped to two decimal
+  digits each (`encodeHealthIdBody()`: `A`→`00` … `Z`→`25`). Visible format
+  **`LLDDDDDDC`**, total length **9** characters.
 - Encodes **nothing** about the patient — no DOB, gender, or facility.
-- Validation: `isValidHealthId(v)` = string, `^\d{11}$`, `dammValid(v)` (the
-  Damm fold over all 11 digits returns 0).
-- **Damm over Luhn**: Damm catches every single-digit error *and* every adjacent
+- Validation: `isValidHealthId(v)` accepts either the new format
+  (`^[A-Z]{2}\d{7}$` and Damm-valid over the letter-encoded body) or a
+  **legacy** 11-digit all-numeric HID (`^\d{11}$`, `dammValid(v)` over all 11
+  digits) — old IDs already issued keep validating.
+- **Damm over Luhn**: Damm catches every single-digit error _and_ every adjacent
   transposition (`07`↔`70`, twin-digit swaps) with one table — Luhn misses
   twin-digit swaps. A mistyped HID is rejected client-side with no DB lookup.
-
-> A planned alphanumeric format (`AA481242` + Damm digit) exists as a design in
-> `docs/superpowers/plans/2026-08-28-alphanumeric-health-id-damm-plan.md` but is
-> **not implemented** — the code is still numeric-11. This document describes the
-> current behaviour.
 
 ## 3. Where it happens
 
 Trigger: any Patient write — `POST /fhir/Patient` or a `transaction`/`batch`
 Bundle with Patient entries — through OpenHIM.
 
-| Component | File |
-|---|---|
-| route + auth + `X-OpenHIM-ClientID` | OpenHIM Core (`docker-compose.yml` `authentication_*`) |
-| handler | `mediator/src/handlers/patient.js` / `mediator/src/handlers/bundle.js` |
-| identity resolution (mint/reuse HID, golden UID, provenance, read-merge) | `mediator/src/fhir/patientIdentity.js` `resolvePatientIdentity()` |
-| HID generation + validation | `mediator/src/fhir/healthId.js` |
-| JeMPI calls + FHIR→JeMPI mapping | `mediator/src/providers/jempiProvider.js` |
-| HAPI I/O (conditional update, searches) | `mediator/src/fhir/hapiClient.js` |
-| `meta.tag` provenance | `mediator/src/fhir/provenance.js` |
+| Component                                                                | File                                                                   |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| route + auth + `X-OpenHIM-ClientID`                                      | OpenHIM Core (`docker-compose.yml` `authentication_*`)                 |
+| handler                                                                  | `mediator/src/handlers/patient.js` / `mediator/src/handlers/bundle.js` |
+| identity resolution (mint/reuse HID, golden UID, provenance, read-merge) | `mediator/src/fhir/patientIdentity.js` `resolvePatientIdentity()`      |
+| HID generation + validation                                              | `mediator/src/fhir/healthId.js`                                        |
+| JeMPI calls + FHIR→JeMPI mapping                                         | `mediator/src/providers/jempiProvider.js`                              |
+| HAPI I/O (conditional update, searches)                                  | `mediator/src/fhir/hapiClient.js`                                      |
+| `meta.tag` provenance                                                    | `mediator/src/fhir/provenance.js`                                      |
 
 ---
 
@@ -62,7 +62,7 @@ Bundle with Patient entries — through OpenHIM.
 flowchart TD
  A["POST Patient via OpenHIM. JWT verified, sub mapped to Client, X-OpenHIM-ClientID injected"] --> B{"Patient body already carries a nepal-health-id identifier that passes isValidHealthId"}
  B -- yes --> C["candidateHealthId equals that value"]
- B -- no --> D["mintUniqueHealthId: loop up to 5 times. generateHealthId equals randomBase (10 digits, first 1 to 9) plus dammCheck. GET Patient by identifier nepal-health-id candidate. Accept the first candidate with NO match"]
+ B -- no --> D["mintUniqueHealthId: loop up to 5 times. generateHealthId equals randomSeries (2 letters) plus randomDigits (6 digits) plus dammCheck, format LLDDDDDDC. GET Patient by identifier nepal-health-id candidate. Accept the first candidate with NO match"]
  C --> E["JeMPI POST crRegister. demographicData: given, family, gender, dob YYYYMMDD, city, phone, nationalId. sourceId.facility equals resolveFacility of clientId. uniqueInteractionData.auxId equals candidateHealthId. candidateThreshold equals JEMPI_CANDIDATE_THRESHOLD 0.9"]
  D --> E
 
@@ -106,7 +106,7 @@ sequenceDiagram
  HIM->>MED: forward plus X-OpenHIM-ClientID NHFR
  Note over MED: no valid incoming HID, mint one
  loop up to 5 attempts
- MED->>MED: generateHealthId equals randomBase plus dammCheck
+ MED->>MED: generateHealthId equals randomSeries plus randomDigits plus dammCheck
  MED->>HAPI: GET Patient identifier nepal-health-id candidate
  HAPI-->>MED: 0 results, accept candidate
  end
@@ -164,7 +164,7 @@ Key points:
   used as `auxId` on the `crRegister` call and is thrown away the moment
   `crCandidates` returns the golden record's stored `auxId`
   (`patientIdentity.js:33` — `healthId = isValidHealthId(link.healthAux) ?
-  link.healthAux : candidateHealthId`).
+link.healthAux : candidateHealthId`).
 - `crCandidates` is a **consistent Dgraph read**, unlike a HAPI search that could
   still be lagging — that is why the reused HID is resolved through JeMPI, not
   through HAPI (`patientIdentity.js` comment; `providers/jempiProvider.js`
@@ -195,7 +195,7 @@ flowchart TD
 ```
 
 > **On this deployment the write path uses `POST /crRegister`, which is a
-> synchronous *deterministic* find-or-create.** It never runs the probabilistic
+> synchronous _deterministic_ find-or-create.** It never runs the probabilistic
 > scorer and never emits a review notification, so JeMPI's own review queue is
 > permanently empty. The threshold band above only applies to JeMPI's async
 > Kafka path. Near-miss duplicates are found and resolved by the
@@ -203,7 +203,7 @@ flowchart TD
 > Source: `admin-mediator/README.md`, `jempi-config/README.md`.
 
 `candidateThreshold` (the `mediator` env `JEMPI_CANDIDATE_THRESHOLD`, default
-`0.9`, sent on `crRegister`) is the confidence needed to link *synchronously* to
+`0.9`, sent on `crRegister`) is the confidence needed to link _synchronously_ to
 an existing golden record; below it, `crRegister` creates a new golden record.
 
 ---
@@ -226,10 +226,10 @@ sequenceDiagram
 
 At read time identity was already resolved at write time; the HID **is** the
 lookup key. `DEMO.md` §9: "Reads bypass JeMPI entirely; by read-time the Health
-ID *is* the HAPI resource id [key]."
+ID _is_ the HAPI resource id [key]."
 
 The **patient portal** resolves by golden UID instead:
-`GET /Patient?identifier=jempi-golden-uid|<gid>` returns *every* linked Patient
+`GET /Patient?identifier=jempi-golden-uid|<gid>` returns _every_ linked Patient
 record, then the portal fans out and merges their encounters/reports/documents
 (`patient-portal-mediator/src/handlers/patientPortal.js`).
 
@@ -261,14 +261,14 @@ flowchart TD
 
 ## 10. Failure map
 
-| Failure | Where | Result |
-|---|---|---|
-| JeMPI unreachable / timeout | `registerInteraction` catch | `502` OperationOutcome, **no HAPI write** — HID not persisted |
-| `crRegister` returns no golden UID and no `exists` | `resolvePatientIdentity` | `502` `no goldenUid returned` |
-| deterministic dup, `crCandidates` yields no golden UID | `jempiProvider` | `502` `deterministic dup could not be resolved to a golden UID` |
-| HID uniqueness search errors | `mintUniqueHealthId` | candidate accepted anyway (the conditional `PUT` still 412s on a real dup) |
-| HAPI conditional update fails (412 / down) | `patient.js` catch | `502` with the HAPI status + a body slice; orchestration recorded |
-| incoming `nepal-health-id` present but not Damm-valid | `patientIdentity.js` | ignored — a fresh HID is minted |
+| Failure                                                | Where                       | Result                                                                     |
+| ------------------------------------------------------ | --------------------------- | -------------------------------------------------------------------------- |
+| JeMPI unreachable / timeout                            | `registerInteraction` catch | `502` OperationOutcome, **no HAPI write** — HID not persisted              |
+| `crRegister` returns no golden UID and no `exists`     | `resolvePatientIdentity`    | `502` `no goldenUid returned`                                              |
+| deterministic dup, `crCandidates` yields no golden UID | `jempiProvider`             | `502` `deterministic dup could not be resolved to a golden UID`            |
+| HID uniqueness search errors                           | `mintUniqueHealthId`        | candidate accepted anyway (the conditional `PUT` still 412s on a real dup) |
+| HAPI conditional update fails (412 / down)             | `patient.js` catch          | `502` with the HAPI status + a body slice; orchestration recorded          |
+| incoming `nepal-health-id` present but not Damm-valid  | `patientIdentity.js`        | ignored — a fresh HID is minted                                            |
 
 Every downstream call — success or failure — is recorded as an **orchestration**
 on the OpenHIM transaction (`orch()` in `mediator/src/lib/orchestration.js`),
