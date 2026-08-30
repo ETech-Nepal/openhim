@@ -232,7 +232,7 @@ services:
     # bima-insurance-number, show the generated Health ID + linked Encounter.
     # REVERT after the demo: this is unauthenticated read/write on the FHIR store.
     ports:
-      - "127.0.0.1:8081:8080"
+      - "8081:8080"
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
       - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro
