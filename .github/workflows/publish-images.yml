@@ -1,0 +1,36 @@
+name: Publish mediator images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: hapi-mediator
+            context: mediator
+          - image: fhir-intake-mediator
+            context: fhir-intake-mediator
+          - image: openhie-admin-mediator
+            context: admin-mediator
+          - image: openhie-patient-portal-mediator
+            context: patient-portal-mediator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
