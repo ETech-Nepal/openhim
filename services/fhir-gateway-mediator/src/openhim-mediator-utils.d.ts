@@ -1,4 +1,4 @@
-declare module 'openhim-mediator-utils' {
+declare module "openhim-mediator-utils" {
   type Options = {
     apiURL: string;
     username: string;
@@ -6,7 +6,10 @@ declare module 'openhim-mediator-utils' {
     trustSelfSigned: boolean;
     urn: string;
   };
-  export function authenticate(options: Options, callback: (error?: Error | null) => void): void;
+  export function authenticate(
+    options: Options,
+    callback: (error?: Error | null) => void,
+  ): void;
   export function genAuthHeaders(options: Options): Record<string, string>;
   export function registerMediator(
     options: Options,

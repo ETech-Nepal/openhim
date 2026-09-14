@@ -1,36 +1,40 @@
-import type { Config } from './config.js';
-import { buildChannels, buildPassthroughChannel } from './channels.js';
-import type { Logger } from 'pino';
-import axios from 'axios';
-import https from 'node:https';
+import type { Config } from "./config.js";
+import { buildChannels, buildPassthroughChannel } from "./channels.js";
+import type { Logger } from "pino";
+import axios from "axios";
+import https from "node:https";
 import {
   activateHeartbeat,
   registerMediator,
   authenticate,
   genAuthHeaders,
-} from 'openhim-mediator-utils';
+} from "openhim-mediator-utils";
 
 // Bind registration to explicit configuration without starting it during imports.
 export function createOpenHimRegistration(config: Config, logger: Logger) {
-  const route = { host: config.MEDIATOR_ROUTE_HOST, port: config.MEDIATOR_PORT };
+  const route = {
+    host: config.MEDIATOR_ROUTE_HOST,
+    port: config.MEDIATOR_PORT,
+  };
   const channels = config.UPSTREAM_ROLE_HEADER
     ? [buildPassthroughChannel(route, config.OPENHIM_CHANNEL_ROLES)]
     : buildChannels(route);
 
   const mediatorConfig = {
     urn: config.MEDIATOR_URN,
-    version: '0.1.0',
-    name: 'NP FHIR Gateway Mediator',
-    description: 'Verifies Keycloak JWT + DPoP and proxies /fhir to HAPI; per-role access is enforced by the channels it registers',
+    version: "0.1.0",
+    name: "NP FHIR Gateway Mediator",
+    description:
+      "Verifies Keycloak JWT + DPoP and proxies /fhir to HAPI; per-role access is enforced by the channels it registers",
     defaultChannelConfig: channels,
     endpoints: [
       {
-        name: 'FHIR endpoint',
+        name: "FHIR endpoint",
         host: config.MEDIATOR_ROUTE_HOST,
         port: config.MEDIATOR_PORT,
-        path: '/fhir',
+        path: "/fhir",
         primary: true,
-        type: 'http',
+        type: "http",
       },
     ],
   };
@@ -64,18 +68,21 @@ export function createOpenHimRegistration(config: Config, logger: Logger) {
       baseURL: config.OPENHIM_API_URL,
       headers,
       timeout: 10000,
-      httpsAgent: new https.Agent({ rejectUnauthorized: !config.OPENHIM_TRUST_SELF_SIGNED }),
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: !config.OPENHIM_TRUST_SELF_SIGNED,
+      }),
     });
 
-    const { data: existing } = await api.get<{ name: string; _id: string }[]>('/channels');
+    const { data: existing } =
+      await api.get<{ name: string; _id: string }[]>("/channels");
     for (const ch of channels) {
       const match = existing.find((e) => e.name === ch.name);
       if (match) {
         await api.put(`/channels/${match._id}`, ch);
-        logger.info({ name: ch.name, id: match._id }, 'channel updated');
+        logger.info({ name: ch.name, id: match._id }, "channel updated");
       } else {
-        await api.post('/channels', ch);
-        logger.info({ name: ch.name }, 'channel created');
+        await api.post("/channels", ch);
+        logger.info({ name: ch.name }, "channel created");
       }
     }
   }
@@ -84,14 +91,17 @@ export function createOpenHimRegistration(config: Config, logger: Logger) {
     return new Promise<void>((resolve, reject) => {
       registerMediator(openhimOpts, mediatorConfig, async (err) => {
         if (err) return reject(err);
-        logger.info({ urn: mediatorConfig.urn }, 'Mediator registered with OpenHIM');
+        logger.info(
+          { urn: mediatorConfig.urn },
+          "Mediator registered with OpenHIM",
+        );
         activateHeartbeat(openhimOpts);
         try {
           await syncChannels();
         } catch (e) {
           logger.warn(
             { err: e instanceof Error ? e.message : String(e) },
-            'channel sync failed (mediator still registered)',
+            "channel sync failed (mediator still registered)",
           );
         }
         resolve();

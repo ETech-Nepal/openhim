@@ -7,7 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "lint": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters",
+    "format:check": "prettier --check src test"
   },
   "dependencies": {
     "axios": "^1.7.0",
@@ -24,6 +26,7 @@
   "devDependencies": {
     "@types/express": "4.17.25",
     "@types/node": "20.19.43",
+    "prettier": "3.9.6",
     "tsx": "4.23.13",
     "typescript": "5.9.3"
   }
