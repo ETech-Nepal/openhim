@@ -130,7 +130,7 @@ export async function execute(
 ): Promise<Result> {
   const mapped = transform(integration, input, "request", context);
   if (mapped.status !== 200) return mapped;
-  if (!integration.destination || !integration.validation)
+  if (!integration.destination)
     return failure(503, "submission_not_configured", context, "configuration");
   const orchestrations: Orchestration[] = [];
   let stage = "request-validation";
@@ -195,11 +195,13 @@ export async function execute(
   };
 
   try {
-    const invalidRequest = await validate(
-      mapped.body,
-      integration.validation.requestProfile,
-    );
-    if (invalidRequest) return invalidRequest;
+    if (integration.validation) {
+      const invalidRequest = await validate(
+        mapped.body,
+        integration.validation.requestProfile,
+      );
+      if (invalidRequest) return invalidRequest;
+    }
     stage = "patient-lookup";
     if (integration.lookup) {
       const identifiers = z
@@ -314,17 +316,8 @@ export async function execute(
           "response",
           context,
         );
-        if (existing.status !== 200)
-          return failure(
-            502,
-            "lookup_response_mapping_failed",
-            context,
-            stage,
-            "not-called",
-            undefined,
-            orchestrations,
-          );
-        return { status: 200, body: existing.body, orchestrations };
+        if (existing.status === 200)
+          return { status: 200, body: existing.body, orchestrations };
       }
     }
     stage = "destination";
@@ -393,12 +386,14 @@ export async function execute(
         issues,
         orchestrations,
       );
-    stage = "response-validation";
-    const invalidResponse = await validate(
-      response.body,
-      integration.validation.responseProfile,
-    );
-    if (invalidResponse) return invalidResponse;
+    if (integration.validation) {
+      stage = "response-validation";
+      const invalidResponse = await validate(
+        response.body,
+        integration.validation.responseProfile,
+      );
+      if (invalidResponse) return invalidResponse;
+    }
     stage = "response-mapping";
     const converted = transform(
       integration,

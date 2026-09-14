@@ -51,11 +51,7 @@ const integrationSchema = z
       .optional(),
     forwardIdempotencyKey: z.boolean().default(false),
   })
-  .strict()
-  .refine(
-    (value) => !value.destination || value.validation,
-    "Submitting integrations require a FHIR validator",
-  );
+  .strict();
 
 export function parseConfig(env: Record<string, unknown>) {
   return Object.freeze(

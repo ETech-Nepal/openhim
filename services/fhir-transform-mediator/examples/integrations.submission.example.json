@@ -8,19 +8,12 @@
     "options": {},
     "destination": {
       "urlEnv": "NHID_URL",
-      "authorizationEnv": "NHID_AUTHORIZATION",
       "timeoutMs": 15000
     },
     "lookup": {
       "urlEnv": "FHIR_SERVER_URL",
-      "authorizationEnv": "FHIR_SERVER_AUTHORIZATION",
       "timeoutMs": 10000,
       "matchIdentifierSystems": ["http://donidcr.gov.np"]
-    },
-    "validation": {
-      "urlEnv": "PATIENT_VALIDATOR_URL",
-      "timeoutMs": 10000,
-      "responseProfile": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient"
     },
     "forwardIdempotencyKey": false
   },
@@ -33,19 +26,12 @@
     "options": {},
     "destination": {
       "urlEnv": "NHID_URL",
-      "authorizationEnv": "NHID_AUTHORIZATION",
       "timeoutMs": 15000
     },
     "lookup": {
       "urlEnv": "FHIR_SERVER_URL",
-      "authorizationEnv": "FHIR_SERVER_AUTHORIZATION",
       "timeoutMs": 10000,
       "matchIdentifierSystems": ["http://donidcr.gov.np"]
-    },
-    "validation": {
-      "urlEnv": "PATIENT_VALIDATOR_URL",
-      "timeoutMs": 10000,
-      "responseProfile": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient"
     },
     "forwardIdempotencyKey": false
   }

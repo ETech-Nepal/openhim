@@ -258,7 +258,7 @@ test("configuration rejects unknown mappings, unsafe URLs, missing secrets and d
   assert.throws(() =>
     parseIntegrations([definition], { ...env, NHID_AUTH: "" }),
   );
-  assert.throws(() =>
+  assert.doesNotThrow(() =>
     parseIntegrations([{ ...definition, validation: undefined }], env),
   );
   assert.equal(
@@ -299,15 +299,16 @@ test("execution validates, submits once, validates response, and returns JSON wi
   assert.ok(!JSON.stringify(result.orchestrations).includes("Example Person"));
 });
 
-test("FHIR lookup returns an existing health ID and prevents duplicate generation", async () => {
+test("FHIR lookup returns an existing health ID or submits once without validation", async () => {
   const lookupIntegration = () =>
     parseIntegrations(
       [
         {
           ...definition,
+          destination: { urlEnv: "NHID_URL", timeoutMs: 1000 },
+          validation: undefined,
           lookup: {
             urlEnv: "FHIR_SERVER_URL",
-            authorizationEnv: "FHIR_SERVER_AUTH",
             timeoutMs: 1000,
             matchIdentifierSystems: ["https://example.test/nid"],
           },
@@ -316,11 +317,15 @@ test("FHIR lookup returns an existing health ID and prevents duplicate generatio
       {
         ...env,
         FHIR_SERVER_URL: "http://example.test/fhir",
-        FHIR_SERVER_AUTH: "Bearer fhir-secret",
       },
     )[0];
+  const patientWithoutHealthId = {
+    ...patient,
+    identifier: [{ system: "https://example.test/nid", value: "00123" }],
+  };
   for (const [entries, expectedStatus, expectedWrites] of [
     [[{ resource: patient }], 200, 0],
+    [[{ resource: patientWithoutHealthId }], 201, 1],
     [[], 201, 1],
     [[{ resource: patient }, { resource: patient }], 409, 0],
   ] as const) {
@@ -347,9 +352,9 @@ test("FHIR lookup returns an existing health ID and prevents duplicate generatio
     );
     assert.equal(result.status, expectedStatus);
     assert.equal(writes, expectedWrites);
-    assert.equal(calls[1].method, "GET");
-    assert.match(calls[1].url, /\/fhir\/Patient\?identifier=/);
-    assert.equal(calls[1].headers.Authorization, "Bearer fhir-secret");
+    assert.equal(calls[0].method, "GET");
+    assert.match(calls[0].url, /\/fhir\/Patient\?identifier=/);
+    assert.equal(calls[0].headers.Authorization, undefined);
     if (entries.length === 1)
       assert.deepEqual(result.body, {
         patientReference: "Patient/patient-1",
