@@ -71,7 +71,7 @@ export function createApp(
     (req, res, next) => {
       const context: Context = res.locals.context;
       const integration =
-        integrations.find((item) => item.channelPath === req.path) ??
+        integrations.find((item) => item.channelPath === req.baseUrl) ??
         integrations.find((item) => item.id === req.params.id);
       if (!context.clientId)
         return send(

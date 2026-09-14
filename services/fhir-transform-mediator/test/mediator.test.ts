@@ -609,6 +609,9 @@ test("real HTTP round trip returns an OpenHIM envelope and enforces client isola
       "Patient",
     );
     assert.equal(writes, 0);
+    const channel = await post("/nagarik/registration", "national-app");
+    assert.equal(channel.status, 201);
+    assert.equal(writes, 1);
     const response = await post(
       "/integrations/national-registration-v1",
       "national-app",
@@ -624,7 +627,7 @@ test("real HTTP round trip returns an OpenHIM envelope and enforces client isola
       healthId: "NH0001",
     });
     assert.equal(envelope.response.headers["Content-Type"], "application/json");
-    assert.equal(writes, 1);
+    assert.equal(writes, 2);
   } finally {
     await close(server);
     await close(external);

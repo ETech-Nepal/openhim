@@ -3,16 +3,20 @@ name: Validate priority mediators
 on:
   pull_request:
     paths:
-      - 'services/fhir-mediator/**'
-      - 'services/fhir-intake-mediator/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/**'
+      - "services/fhir-mediator/**"
+      - "services/fhir-intake-mediator/**"
+      - "services/fhir-transform-mediator/**"
+      - "services/fhir-gateway-mediator/**"
+      - "docker-compose.yml"
+      - ".github/workflows/**"
   push:
     paths:
-      - 'services/fhir-mediator/**'
-      - 'services/fhir-intake-mediator/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/**'
+      - "services/fhir-mediator/**"
+      - "services/fhir-intake-mediator/**"
+      - "services/fhir-transform-mediator/**"
+      - "services/fhir-gateway-mediator/**"
+      - "docker-compose.yml"
+      - ".github/workflows/**"
   workflow_call:
   workflow_dispatch:
 
@@ -24,7 +28,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [fhir-intake-mediator, fhir-mediator]
+        service:
+          [
+            fhir-intake-mediator,
+            fhir-mediator,
+            fhir-transform-mediator,
+            fhir-gateway-mediator,
+          ]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -32,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
           cache-dependency-path: services/${{ matrix.service }}/package-lock.json
       - run: npm ci

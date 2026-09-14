@@ -1,6 +1,5 @@
 node_modules
 dist
 .env
-integrations.json
 test
 IMPLEMENTATION.md
