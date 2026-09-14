@@ -27,7 +27,13 @@ SIGNING_INPUT="$HEADER.$PAYLOAD"
 SIGNATURE=$(printf '%s' "$SIGNING_INPUT" | openssl dgst -sha256 -sign "$PRIV" | b64url)
 ASSERTION="$SIGNING_INPUT.$SIGNATURE"
 
+# DPoP proof for the token endpoint; Keycloak binds the issued token to this key
+# (cnf.jkt). Harmless for clients created with DPOP=false. Resource requests need a
+# fresh proof per call: node keycloak/dpop-proof.mjs <key> GET <url> <access_token>
+DPOP_PROOF=$(node "$(dirname "$0")/dpop-proof.mjs" "$PRIV" POST "$TOKEN_EP")
+
 curl -s -X POST "$TOKEN_EP" \
+  -H "DPoP: $DPOP_PROOF" \
   -d grant_type=client_credentials \
   -d client_id="$CLIENT_ID" \
   -d client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer \

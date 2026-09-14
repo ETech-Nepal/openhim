@@ -6,13 +6,9 @@
 #   ./keycloak/setup.sh
 #
 # Then:
-#   1. ./keycloak/extract-realm-pubkey.sh   (writes openhim-config/realm-public.pem)
-#   2. docker compose up -d --force-recreate openhim-core
-#      (this changes openhim-core's IP — restart the other mediators after:
-#       docker compose restart mediator admin-mediator patient-portal-mediator)
-#   3. Register the demo user's sub as an OpenHIM Client (role np-fhir-clients):
+#   1. Register the demo user's sub as an OpenHIM Client (role np-fhir-clients):
 #        docker exec -e HIP_CLIENT_SUB=<sub printed below> -e HIP_CLIENT_NAME="Demo Client" \
-#          mediator node scripts/create-hip-client.js
+#          mediator node dist/scripts/create-hip-client.js
 set -euo pipefail
 
 KC="docker exec keycloak /opt/keycloak/bin/kcadm.sh"

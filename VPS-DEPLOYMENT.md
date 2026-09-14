@@ -100,8 +100,7 @@ VPS_IP=203.0.113.10 ./deploy-vps.sh           # raw-IP test mode
 It installs any missing prerequisites (`docker.io`, `docker-compose-v2`, `git`,
 `jq`, `curl`, `openssl`, `wireguard`), `systemctl enable --now docker`, adds you
 to the `docker` group, clones the repo to `/opt/openhie`, seeds the four mediator
-`.env` files from their examples, creates the placeholder
-`openhim-config/realm-public.pem`, and writes the **root `.env`** (`DOMAIN=` or
+`.env` files from their examples, and writes the **root `.env`** (`DOMAIN=` or
 `VPS_IP=`/`KEYCLOAK_PUBLIC_URL=`/`KEYCLOAK_ISSUER=`). It stops **before**
 `docker compose up` and prints the remaining manual steps. Re-runnable; it never
 overwrites an existing `.env`.
@@ -118,12 +117,10 @@ sudo usermod -aG docker "$USER" && newgrp docker
 sudo mkdir -p /opt/openhie && sudo chown "$USER:$(id -gn)" /opt/openhie
 cd /opt && git clone https://github.com/ETech-Nepal/openhim.git openhie && cd openhie
 
-for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+for d in services/fhir-mediator admin-mediator patient-portal-mediator services/fhir-intake-mediator; do
   cp "$d/.env.example" "$d/.env"
 done
-mkdir -p openhim-config
-[ -f openhim-config/realm-public.pem ] || touch openhim-config/realm-public.pem
-chmod 600 */.env openhim-config/realm-public.pem
+chmod 600 */.env
 ```
 
 ### Root `.env` (both options must end up with this)
@@ -213,14 +210,14 @@ Source: `Caddyfile`.
 
 ## 5. WireGuard tunnel to JeMPI
 
-The mediators reach JeMPI at `JEMPI_BASE_URL` in `mediator/.env` **and**
+The mediators reach JeMPI at `JEMPI_BASE_URL` in `services/fhir-mediator/.env` **and**
 `admin-mediator/.env`. Two ways:
 
 ### Option A — public port (simplest; test data only)
 
 ```bash
 sed -i 's#^JEMPI_BASE_URL=.*#JEMPI_BASE_URL=http://<jempi-vps-ip>:50000/JeMPI#' \
-  mediator/.env admin-mediator/.env
+  services/fhir-mediator/.env admin-mediator/.env
 curl http://<jempi-vps-ip>:50000/JeMPI/countRecords     # must return JSON
 ```
 
@@ -284,7 +281,7 @@ curl http://10.8.0.1:50000/JeMPI/countRecords          # from the host — must 
 ```
 
 Keep `JEMPI_BASE_URL=http://10.8.0.1:50000/JeMPI` (the default) in both
-`mediator/.env` and `admin-mediator/.env`.
+`services/fhir-mediator/.env` and `admin-mediator/.env`.
 
 **Container can't reach `10.8.0.1` even though the host can** — masquerade the
 Docker subnet out the tunnel (the containers reach `10.8.0.1` through Docker NAT,
@@ -446,7 +443,7 @@ substituting the URL:
 
 ```bash
 NEWPW='<the-password-you-set>'
-for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+for d in services/fhir-mediator admin-mediator patient-portal-mediator services/fhir-intake-mediator; do
   sed -i "s/^OPENHIM_PASSWORD=.*/OPENHIM_PASSWORD=${NEWPW}/" "$d/.env"
 done
 docker compose up -d --force-recreate mediator admin-mediator patient-portal-mediator fhir-intake-mediator
@@ -466,19 +463,16 @@ public issuer even over loopback, and it must match `KEYCLOAK_ISSUER`.
 # realm (auto-imported, or ./keycloak/setup.sh)
 curl -fsS http://localhost:8083/realms/openhie/.well-known/openid-configuration | jq .issuer
 # → https://keycloak.<DOMAIN>/realms/openhie   (domain mode)
-
-# realm public key into OpenHIM
-./keycloak/extract-realm-pubkey.sh
-docker compose --profile vps up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
 ```
+
+OpenHIM fetches the realm signing keys from `KEYCLOAK_JWKS_URI` (root `.env`,
+default `http://keycloak:8080/realms/openhie/protocol/openid-connect/certs`) —
+no key file to extract; the realm segment must match `KEYCLOAK_ISSUER`.
 
 After any change to the root `.env` (`DOMAIN` / `KEYCLOAK_*`):
 
 ```bash
 docker compose --profile vps up -d --force-recreate keycloak openhim-core
-./keycloak/extract-realm-pubkey.sh
-docker compose --profile vps up -d --force-recreate openhim-core
 docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
 ```
 
@@ -571,7 +565,7 @@ Verify: `sudo reboot`; after reconnect `docker compose --profile vps ps` → all
 ```bash
 docker compose --profile vps ps            # all Up; fhir healthy after ~1 min
 sudo wg show                                # (Option B) recent handshake with the JeMPI peer
-docker exec mediator wget -qO- "$(grep -h '^JEMPI_BASE_URL=' mediator/.env | cut -d= -f2-)/countRecords"
+docker exec mediator wget -qO- "$(grep -h '^JEMPI_BASE_URL=' services/fhir-mediator/.env | cut -d= -f2-)/countRecords"
 
 KEYCLOAK_URL=https://keycloak.<DOMAIN> TOKEN=$(./keycloak/get-jwt-client-token.sh <nhfr>)
 curl -sS -X POST https://openhim.<DOMAIN>/fhir/Patient \
@@ -610,7 +604,7 @@ docker compose --profile vps down -v --rmi all
 
 Drops Keycloak H2, OpenHIM Mongo, HAPI + `admin_review` Postgres, **and Caddy's
 certificates**. Survives: `keycloak/keys/*.pem`, `*/.env` (root pw now wrong),
-stale `realm-public.pem`, `hapi-config/`, `jempi-config/`. JeMPI (separate host)
+`hapi-config/`, `jempi-config/`. JeMPI (separate host)
 is untouched. Before repeating a wipe, make sure DNS still resolves (§4) —
 Let's Encrypt rate-limits repeated issuance for the same names. Rebuild: §7 → §8
 → §9 → §11.

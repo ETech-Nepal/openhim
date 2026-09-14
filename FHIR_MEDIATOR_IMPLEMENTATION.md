@@ -1,5 +1,7 @@
 # FHIR Mediator — Implementation Guide
 
+> Historical JavaScript design reference. Current TypeScript structure and commands are in `services/fhir-mediator/README.md`.
+
 > **For Claude Code.** Read this whole file before writing any code. Phase order is mandatory. Replace every `<<CONFIRM: ... >>` with a real value before implementing the section it appears in. Do not guess.
 
 ---
@@ -32,7 +34,7 @@ An OpenHIE-compliant FHIR mediator that sits between client EMRs and HAPI FHIR. 
                             └──────────────┘               └──────────────┘
 ```
 
-**Auth flow:** EMR → Keycloak `/realms/openhie/protocol/openid-connect/token` → JWT → `Authorization: Bearer <jwt>` on every request to OpenHIM → OpenHIM verifies signature against mounted `realm-public.pem` → OpenHIM maps JWT `sub` claim to a registered OpenHIM Client → forwards to mediator. **The mediator does not validate JWTs itself.**
+**Auth flow:** EMR → Keycloak `/realms/openhie/protocol/openid-connect/token` → JWT → `Authorization: Bearer <jwt>` on every request to OpenHIM → OpenHIM verifies signature against the realm JWKS (cached) → OpenHIM maps JWT `sub` claim to a registered OpenHIM Client → forwards to mediator. **The mediator does not validate JWTs itself.**
 
 **Stack already running locally (laptop, Docker Compose):**
 
@@ -92,7 +94,7 @@ An OpenHIE-compliant FHIR mediator that sits between client EMRs and HAPI FHIR. 
 ## 2. Project layout
 
 ```
-mediator/
+services/fhir-mediator/
 ├── package.json
 ├── .env.example
 ├── .env                           # gitignored
@@ -485,7 +487,7 @@ start();
 ### 3.10 Phase 1 exit check
 
 ```bash
-cd mediator
+cd services/fhir-mediator
 npm install
 cp .env.example .env   # fill in OPENHIM_PASSWORD and any other <<SET>> values
 npm run dev

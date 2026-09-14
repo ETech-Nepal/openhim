@@ -10,16 +10,13 @@ its realm every time the container was recreated.
 ```bash
 docker compose up -d keycloak
 ./keycloak/setup.sh                    # creates realm `openhie` + demo-client + demo user
-./keycloak/extract-realm-pubkey.sh     # writes ../openhim-config/realm-public.pem
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator
 ```
 
 Then register the demo user's sub (printed by `setup.sh`) as an OpenHIM Client:
 
 ```bash
 docker exec -e HIP_CLIENT_SUB=<sub> -e HIP_CLIENT_NAME="Demo Client" \
-  mediator node scripts/create-hip-client.js
+  mediator node dist/scripts/create-hip-client.js
 ```
 
 ## Get a demo token
@@ -39,15 +36,15 @@ Use it as `Authorization: Bearer <token>` against `https://localhost:5000/fhir/.
   before anything but local dev).
 - Bound to `127.0.0.1:8083` only, matching `authentication_jwt_issuer` in
   `docker-compose.yml`. Don't change the port without updating that too.
-- Recreating the realm always changes its RSA keypair — re-run
-  `extract-realm-pubkey.sh` + force-recreate `openhim-core` whenever you wipe
-  and rebuild the realm.
+- OpenHIM pulls the realm signing keys from the JWKS endpoint
+  (`authentication_jwt_jwksUri`) and refetches on an unknown `kid`, so wiping and
+  rebuilding the realm needs no OpenHIM restart.
 - `OPENHIM_CHANNEL_ROLE` the mediator binds its channel to is `np-fhir-clients`
-  (see `mediator/.env`) — any OpenHIM Client backing a Keycloak subject needs
+  (see `services/fhir-mediator/.env`) — any OpenHIM Client backing a Keycloak subject needs
   that role to pass the channel's `allow` check.
 - For the CDRS dump script's `health-information-provider` client
   (private_key_jwt / client-jwt auth, no password), see
-  [[cdrs-dump-script]] and `mediator/scripts/create-hip-client.js` — that
+  [[cdrs-dump-script]] and `services/fhir-mediator/src/scripts/create-hip-client.ts` — that
   client isn't created by `setup.sh` since it needs a real RSA keypair
   generated and registered by hand.
 
@@ -62,7 +59,6 @@ written in the same formats, so a client created by one works with the other.
 | bash | PowerShell |
 | --- | --- |
 | `./keycloak/setup.sh` | `pwsh -File .\keycloak\setup.ps1` |
-| `./keycloak/extract-realm-pubkey.sh` | `pwsh -File .\keycloak\extract-realm-pubkey.ps1` |
 | `./keycloak/create-org.sh <nhfr> "<name>"` | `pwsh -File .\keycloak\create-org.ps1 <nhfr> "<name>"` |
 | `./keycloak/create-jwt-client.sh <client-id>` | `pwsh -File .\keycloak\create-jwt-client.ps1 <client-id>` |
 | `./keycloak/get-jwt-client-token.sh <client-id>` | `pwsh -File .\keycloak\get-jwt-client-token.ps1 <client-id>` |
@@ -81,8 +77,3 @@ Demo token without `jq`:
 Overrides via environment: `KEYCLOAK_URL` (default `http://localhost:8083`),
 `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` (default `admin`/`admin`),
 plus `FHIR_BASE_URL` and `ACCESS_TOKEN` for `create-org.ps1`.
-
-Gotcha: if Docker Desktop started the stack before `realm-public.pem` existed, it
-created an empty **directory** at `openhim-config\realm-public.pem`.
-`extract-realm-pubkey.ps1` detects this and prints the fix (stop `openhim-core`,
-remove the directory, re-run, force-recreate).

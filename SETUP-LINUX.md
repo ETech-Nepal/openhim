@@ -31,12 +31,12 @@ is identical.
 |---|---|---|
 | Docker Engine + Compose v2 | runs the whole stack | `curl -fsSL https://get.docker.com \| sh` |
 | Git | clone the repo | `sudo apt-get install -y git` |
-| `jq` | `keycloak/*.sh`, `extract-realm-pubkey.sh` | `sudo apt-get install -y jq` |
+| `jq` | `keycloak/*.sh` | `sudo apt-get install -y jq` |
 | `curl` | scripts + health checks | usually present |
 | `openssl` | `create-jwt-client.sh`, `get-jwt-client-token.sh` | usually present |
 | `python3` | `onboard-hospital.sh` reads the JWT `sub` claim | `sudo apt-get install -y python3` |
 | `wireguard` (`wg`, `wg-quick`) | only if you tunnel to JeMPI (0e Option B) | `sudo apt-get install -y wireguard` |
-| `fold`, `base64` | `extract-realm-pubkey.sh`, `create-jwt-client.sh` | part of `coreutils` (present) |
+| `fold`, `base64` | `create-jwt-client.sh` | part of `coreutils` (present) |
 
 One line for Debian/Ubuntu:
 
@@ -81,20 +81,11 @@ bind-mounts several paths from this tree (`openhim-config`, `hapi-config`,
 Four mediator `.env` files and one placeholder key file:
 
 ```bash
-for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+for d in services/fhir-mediator admin-mediator patient-portal-mediator services/fhir-intake-mediator; do
   cp "$d/.env.example" "$d/.env"
 done
-mkdir -p openhim-config
-[ -f openhim-config/realm-public.pem ] || touch openhim-config/realm-public.pem
-chmod 600 */.env openhim-config/realm-public.pem
+chmod 600 */.env
 ```
-
-**Why the empty `realm-public.pem`:** `docker-compose.yml` bind-mounts it into
-`openhim-core`. If it does not exist when the stack first starts, Docker creates
-the mount target as a **directory**, the entrypoint's `cat` yields nothing,
-`authentication_jwt_secretOrPublicKey` ends up empty, and every token fails with
-`JWT could not be verified: secret or public key must be provided`. Step 6
-overwrites this file with the real key.
 
 The defaults in the examples are correct for a local Docker run. Only these need
 your input:
@@ -102,9 +93,9 @@ your input:
 | File | Variable | Set to |
 |---|---|---|
 | all four | `OPENHIM_PASSWORD` | the OpenHIM root password from step 3 — **blank in the examples**; mediators crash-loop until it is filled |
-| `mediator/.env`, `admin-mediator/.env` | `JEMPI_BASE_URL` | see step 0e |
+| `services/fhir-mediator/.env`, `admin-mediator/.env` | `JEMPI_BASE_URL` | see step 0e |
 | `patient-portal-mediator/.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` |
-| `mediator/.env` | `FACILITY_REGISTRY_JSON` | only as the step-7 fallback |
+| `services/fhir-mediator/.env` | `FACILITY_REGISTRY_JSON` | only as the step-7 fallback |
 
 Do **not** create a root `.env` for a local run — every variable has a
 `localhost` default in `docker-compose.yml`, and a half-filled root `.env` points
@@ -114,7 +105,7 @@ VPS-only file (`VPS-DEPLOYMENT.md`).
 ### 0e. Decide how the mediators reach JeMPI
 
 JeMPI is **not** in this compose stack. It runs on a separate host
-(`202.51.71.81`). Both `mediator/.env` and `admin-mediator/.env` need
+(`202.51.71.81`). Both `services/fhir-mediator/.env` and `admin-mediator/.env` need
 `JEMPI_BASE_URL`. Pick one now; you can change it later with
 `docker compose up -d --force-recreate mediator admin-mediator`.
 
@@ -122,7 +113,7 @@ JeMPI is **not** in this compose stack. It runs on a separate host
 
 ```bash
 sed -i 's#^JEMPI_BASE_URL=.*#JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI#' \
-  mediator/.env admin-mediator/.env
+  services/fhir-mediator/.env admin-mediator/.env
 curl http://202.51.71.81:50000/JeMPI/countRecords     # must return JSON
 ```
 
@@ -203,7 +194,7 @@ value is propagated to the mediators by script or by hand.
 
 ```bash
 NEWPW='<the-password-you-set>'
-for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+for d in services/fhir-mediator admin-mediator patient-portal-mediator services/fhir-intake-mediator; do
   sed -i "s/^OPENHIM_PASSWORD=.*/OPENHIM_PASSWORD=${NEWPW}/" "$d/.env"
 done
 docker compose up -d --force-recreate mediator admin-mediator patient-portal-mediator fhir-intake-mediator
@@ -281,45 +272,16 @@ curl -fsS http://localhost:8083/realms/openhie/.well-known/openid-configuration 
 
 ---
 
-## 5. Realm public key into OpenHIM
+## 5. Realm keys into OpenHIM
 
-OpenHIM verifies every JWT against the realm's RS256 **public key read from a
-file at boot** (`openhim-config/realm-public.pem`) — not a live call to Keycloak.
-Any time the realm is recreated its keypair rotates and this file must be
-refreshed.
+Nothing to do. OpenHIM fetches the realm's RS256 signing keys from the Keycloak
+JWKS endpoint (`authentication_jwt_jwksUri`, default
+`http://keycloak:8080/realms/openhie/protocol/openid-connect/certs` over the
+docker network) and caches them; an unknown `kid` triggers a refetch, so
+recreating the realm or rotating its keys needs no restart and no file.
 
-### Option A — script
-
-```bash
-./keycloak/extract-realm-pubkey.sh
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-```
-
-### Option B — manual (CLI)
-
-```bash
-KEY=$(curl -fsS http://localhost:8083/realms/openhie | jq -r .public_key)
-{ echo "-----BEGIN PUBLIC KEY-----"; echo "$KEY" | fold -w64; echo "-----END PUBLIC KEY-----"; } \
-  > openhim-config/realm-public.pem
-openssl pkey -pubin -in openhim-config/realm-public.pem -noout && echo OK
-
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-```
-
-### Option C — GUI (to read the key; the file still has to be written)
-
-Keycloak Admin Console → realm `openhie` → **Realm settings → Keys** → the
-**RS256** row → **Public key** → copy. Paste it between
-`-----BEGIN PUBLIC KEY-----` / `-----END PUBLIC KEY-----` lines (wrapped at 64
-chars) into `openhim-config/realm-public.pem`, then run the two `docker compose`
-commands from Option A.
-
-> **If `realm-public.pem` is a directory** (Docker created the mount target
-> before the file existed):
-> `docker compose stop openhim-core && rm -rf openhim-config/realm-public.pem`
-> then redo this step.
+If your realm is not `openhie`, set `KEYCLOAK_JWKS_URI` in the root `.env`
+to the matching internal URL.
 
 The OpenHIM JWT settings are already in `docker-compose.yml`:
 `authentication_jwt_algorithms: "RS256"` (a plain string, **not** `["RS256"]`),
@@ -424,7 +386,7 @@ python3 -c 'import base64,json,sys;p=sys.stdin.read().strip().split(".")[1];p+="
 
 # 7b.5 — OpenHIM Client (clientID = the sub, role np-fhir-clients, no password)
 docker exec -e HIP_CLIENT_SUB="$NHFR" -e HIP_CLIENT_NAME="$NAME" \
-  mediator node scripts/create-hip-client.js
+  mediator node dist/scripts/create-hip-client.js
 ```
 
 ### Option C — GUI
@@ -453,7 +415,7 @@ docker exec -e HIP_CLIENT_SUB="$NHFR" -e HIP_CLIENT_NAME="$NAME" \
 
 `onboard-hospital.sh` fails at step 4/5 with
 `token sub is '<uuid>', expected '<nhfr>'`. Leave the OpenHIM `clientID` as the
-Keycloak service-account UUID and add to `mediator/.env`:
+Keycloak service-account UUID and add to `services/fhir-mediator/.env`:
 
 ```
 FACILITY_REGISTRY_JSON={"<keycloak-service-account-uuid>":"3130400221"}
@@ -461,7 +423,7 @@ FACILITY_REGISTRY_JSON={"<keycloak-service-account-uuid>":"3130400221"}
 
 then `docker compose up -d --force-recreate mediator`. The mediator maps the
 UUID → NHFR code (`resolveFacility()` in
-`mediator/src/providers/jempiProvider.js`).
+`services/fhir-mediator/src/clients/jempi.ts`).
 
 **Verify (any option):**
 
@@ -517,7 +479,7 @@ nothing else; inbound `X-NHFR-ID` / `organization_id` are ignored. The mediator
 resolves `GET Organization?identifier=nhfr|<clientID>` (exactly one → `422`
 otherwise) and stamps `managingOrganization` / `serviceProvider`.
 
-Set `OPENHIM_CHANNEL_ROLE=np-fhir-clients` in `fhir-intake-mediator/.env` to
+Set `OPENHIM_CHANNEL_ROLE=np-fhir-clients` in `services/fhir-intake-mediator/.env` to
 reuse the hospital clients from step 7, then
 `docker compose up -d --force-recreate fhir-intake-mediator`.
 
@@ -597,7 +559,7 @@ Drops: Keycloak H2 (realm + all clients/mappers), OpenHIM Mongo (clients,
 channels, transactions), HAPI Postgres (+ `admin_review`); forces an image
 re-pull. **Survives on disk:** `keycloak/keys/*.pem` (hospital keypairs — reused
 by `create-jwt-client.sh`), `*/.env` (but `OPENHIM_PASSWORD` is now wrong — root
-resets to `openhim-password`), `openhim-config/realm-public.pem` (**stale**),
+resets to `openhim-password`),
 `hapi-config/`, `jempi-config/`. **JeMPI golden records are untouched** (JeMPI is
 external), so a "fresh" stack still matches previously registered patients.
 
@@ -612,12 +574,10 @@ Rebuild order: step 1 → step 3 (reset + propagate root password) → step 4 �
 | Task | Command |
 |---|---|
 | Create the `.env` files | `cp <svc>/.env.example <svc>/.env` (0d) |
-| Pre-create the key file | `touch openhim-config/realm-public.pem` (0d) |
 | Bring the stack up | `docker compose up -d` |
 | Reload a changed `.env` | `docker compose up -d --force-recreate <svc>` |
 | Create the realm | `./keycloak/setup.sh` |
 | Create/update an Organization | `./keycloak/create-org.sh <nhfr> "<name>"` |
-| Re-extract realm key | `./keycloak/extract-realm-pubkey.sh` |
 | Onboard a hospital | `./keycloak/onboard-hospital.sh <nhfr> "<name>"` |
 | Hospital token | `./keycloak/get-jwt-client-token.sh <nhfr>` |
 | Postman token helper | `node keycloak/token-server.mjs` (`:4099`) |
@@ -630,8 +590,7 @@ Rebuild order: step 1 → step 3 (reset + propagate root password) → step 4 �
 | Console calls fail, network error | trust the cert — <https://localhost:8080/heartbeat> (step 2) |
 | Mediator missing under **Mediators** | `OPENHIM_PASSWORD` ≠ root password (step 3b) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
-| `JWT could not be verified: secret or public key must be provided` | `realm-public.pem` empty or a directory — step 5 recovery |
-| `JWT could not be verified` (other) | `realm-public.pem` stale — re-run step 5 |
+| `JWT could not be verified` / `Public key not found in JWKS cache` | core cannot reach `KEYCLOAK_JWKS_URI` (realm name wrong, or Keycloak down) — `docker compose logs openhim-core` |
 | 401 at `:5000` with a fresh token | `iss` mismatch — token `iss` must equal `http://localhost:8083/realms/openhie` |
 | 403 at `:5000` | Client lacks the channel role — re-run step 7 |
 | 404 at `:5000/...` | channel missing — `docker compose restart <mediator>` |

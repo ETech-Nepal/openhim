@@ -1,0 +1,8 @@
+{
+  "demographicFields": [
+    { "fieldName": "given_name", "linkMetaData": { "m": 0.9, "u": 0.1, "comparisonLevels": [0.92] } },
+    { "fieldName": "dob", "linkMetaData": { "m": 0.9, "u": 0.01, "comparisonLevels": [0.92] } },
+    { "fieldName": "national_id", "linkMetaData": { "m": 0.9, "u": 0.001, "comparisonLevels": [0.92] } },
+    { "fieldName": "phone_number", "linkMetaData": { "m": 0.9, "u": 0.001, "comparisonLevels": [0.92] } }
+  ]
+}

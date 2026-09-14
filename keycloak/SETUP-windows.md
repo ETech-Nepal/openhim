@@ -140,23 +140,14 @@ exists — go to §6. Otherwise:
 
 ---
 
-## 5. Realm key into OpenHIM
+## 5. Realm keys into OpenHIM
 
-Git Bash:
-
-```bash
-./keycloak/extract-realm-pubkey.sh
-```
-
-PowerShell:
-
-```powershell
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-```
-
-> A realm rebuild rotates Keycloak's RSA key → re-run this or every token fails
-> `JWT could not be verified`.
+Nothing to run. OpenHIM fetches the realm's RS256 signing keys from the Keycloak JWKS endpoint
+(`authentication_jwt_jwksUri`, default
+`http://keycloak:8080/realms/openhie/protocol/openid-connect/certs` over the
+docker network) and caches them; an unknown `kid` triggers a refetch, so a realm
+rebuild or key rotation needs no restart and no file. If your realm is not
+`openhie`, set `KEYCLOAK_JWKS_URI` in the root `.env`.
 
 OpenHIM env (already in `docker-compose.yml`): `authentication_jwt_algorithms`
 = `RS256`, `authentication_jwt_audience` = `account`,
@@ -290,7 +281,6 @@ curl -k -sS -X POST https://localhost:5000/ingest \
 |---|---|---|
 | Create the realm | `./keycloak/setup.sh` | Git Bash |
 | Create/update an Organization | `./keycloak/create-org.sh <nhfr-id> "<name>"` | Git Bash |
-| Re-extract realm key | `./keycloak/extract-realm-pubkey.sh` | Git Bash |
 | Onboard a hospital | `./keycloak/onboard-hospital.sh <nhfr-id> "<name>"` | Git Bash |
 | Hospital token | `./keycloak/get-jwt-client-token.sh <nhfr-id>` | Git Bash |
 | Postman token helper | `node keycloak/token-server.mjs` (`:4099`) | any |
@@ -306,7 +296,7 @@ curl -k -sS -X POST https://localhost:5000/ingest \
 | Console calls fail, network error | accept the cert — <https://localhost:8080/heartbeat> (2a) |
 | Mediator missing under **Mediators** | `OPENHIM_PASSWORD` ≠ root password (2c) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
-| `JWT could not be verified` | `realm-public.pem` stale — re-run §5 |
+| `JWT could not be verified` / `Public key not found in JWKS cache` | core cannot reach `KEYCLOAK_JWKS_URI` — `docker compose logs openhim-core` (§5) |
 | 401 at `:5000` fresh token | issuer mismatch — `iss` must be `http://localhost:8083/realms/openhie` |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.sh` (§6) |
 | 404 at `:5000/ingest` | `NP FHIR Intake` channel missing — check `fhir-intake-mediator` |

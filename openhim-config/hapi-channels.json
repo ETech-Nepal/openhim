@@ -1,0 +1,105 @@
+[
+  {
+    "type": "http",
+    "status": "enabled",
+    "authType": "private",
+    "requestBody": true,
+    "responseBody": true,
+    "name": "FHIR metadata",
+    "urlPattern": "^/fhir/metadata$",
+    "methods": [
+      "GET"
+    ],
+    "allow": [
+      "ehr",
+      "patient"
+    ],
+    "routes": [
+      {
+        "name": "gateway",
+        "host": "fhir-gateway-mediator",
+        "port": 4004,
+        "primary": true,
+        "type": "http",
+        "secured": false
+      }
+    ]
+  },
+  {
+    "type": "http",
+    "status": "enabled",
+    "authType": "private",
+    "requestBody": true,
+    "responseBody": true,
+    "name": "FHIR ehr create",
+    "methods": [
+      "POST"
+    ],
+    "allow": [
+      "ehr"
+    ],
+    "routes": [
+      {
+        "name": "gateway",
+        "host": "fhir-gateway-mediator",
+        "port": 4004,
+        "primary": true,
+        "type": "http",
+        "secured": false
+      }
+    ],
+    "urlPattern": "^/fhir/(Patient|Encounter|Observation|Condition|Procedure|DiagnosticReport)(/\\$validate)?$"
+  },
+  {
+    "type": "http",
+    "status": "enabled",
+    "authType": "private",
+    "requestBody": true,
+    "responseBody": true,
+    "name": "FHIR ehr read",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "allow": [
+      "ehr"
+    ],
+    "routes": [
+      {
+        "name": "gateway",
+        "host": "fhir-gateway-mediator",
+        "port": 4004,
+        "primary": true,
+        "type": "http",
+        "secured": false
+      }
+    ],
+    "urlPattern": "^/fhir/(Patient|Encounter|Observation|Condition|Procedure|DiagnosticReport)(/[^/]+)?(/\\$meta)?$"
+  },
+  {
+    "type": "http",
+    "status": "enabled",
+    "authType": "private",
+    "requestBody": true,
+    "responseBody": true,
+    "name": "FHIR patient read",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "allow": [
+      "patient"
+    ],
+    "routes": [
+      {
+        "name": "gateway",
+        "host": "fhir-gateway-mediator",
+        "port": 4004,
+        "primary": true,
+        "type": "http",
+        "secured": false
+      }
+    ],
+    "urlPattern": "^/fhir/(Patient|Encounter|Observation)(/[^/]+)?(/\\$meta)?$"
+  }
+]

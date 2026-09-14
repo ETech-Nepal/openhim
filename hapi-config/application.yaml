@@ -31,14 +31,14 @@ hapi:
     # default ALPHANUMERIC strategy rejects purely-numeric client ids.
     client_id_strategy: ANY
 
-    # Load the Nepal NP Core IG (np.core 0.1.0) so the server knows the
-    # mohp.gov.np profiles, value sets and naming systems and can validate
+    # Load the Nepal NP Core IG (np.core 1.0.0) so the server knows the
+    # fhir.digitalhealth.gov.np/core profiles, value sets and naming systems and can validate
     # resources against them. Tarball is mounted read-only by docker-compose.
     implementationguides:
       np_core:
         name: np.core
-        version: 0.1.0
-        packageUrl: file:/app/config/np.core-0.1.0.tgz
+        version: 1.0.0
+        packageUrl: file:/app/config/np.core-1.0.0.tgz
 
     # Validation stays OFF until the mediators emit np-core-conformant resources
     # (meta.profile + a mandatory nepal-health-id identifier). Flip on to enforce:

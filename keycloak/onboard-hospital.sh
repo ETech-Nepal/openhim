@@ -60,7 +60,7 @@ echo "   token sub = $SUB"
 
 echo "== 5/5  OpenHIM Client =="
 docker exec -e HIP_CLIENT_SUB="$NHFR" -e HIP_CLIENT_NAME="$NAME" \
-  mediator node scripts/create-hip-client.js
+  mediator node dist/scripts/create-hip-client.js
 
 cat <<EOF
 

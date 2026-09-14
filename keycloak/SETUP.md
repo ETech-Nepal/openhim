@@ -62,8 +62,8 @@ Running: `hapi-db`, `mongo-db`, `openhim-core`, `openhim-console`, `fhir`,
 
 ### 2c. Propagate to mediators
 
-Set `OPENHIM_PASSWORD` in `mediator/.env`, `admin-mediator/.env`,
-`patient-portal-mediator/.env`, `fhir-intake-mediator/.env`, then:
+Set `OPENHIM_PASSWORD` in `services/fhir-mediator/.env`, `admin-mediator/.env`,
+`patient-portal-mediator/.env`, `services/fhir-intake-mediator/.env`, then:
 
 ```bash
 docker compose up -d --force-recreate mediator admin-mediator patient-portal-mediator fhir-intake-mediator
@@ -77,13 +77,13 @@ Console → **Mediators**: all four green.
 
 ## 3. Reach JeMPI
 
-The mediator talks to JeMPI at `JEMPI_BASE_URL` in `mediator/.env`. Pick one.
+The mediator talks to JeMPI at `JEMPI_BASE_URL` in `services/fhir-mediator/.env`. Pick one.
 After changing it: `docker compose up -d --force-recreate mediator`.
 
 ### Option A — JeMPI public IP (simplest)
 
 ```bash
-# mediator/.env
+# services/fhir-mediator/.env
 JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI
 ```
 
@@ -134,16 +134,14 @@ the VPS loopback port. Otherwise:
 
 ---
 
-## 5. Realm key into OpenHIM
+## 5. Realm keys into OpenHIM
 
-```bash
-./keycloak/extract-realm-pubkey.sh
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-```
-
-> A realm rebuild rotates Keycloak's RSA key → re-run this or every token fails
-> `JWT could not be verified`.
+Nothing to run. OpenHIM fetches the realm's RS256 signing keys from the Keycloak JWKS endpoint
+(`authentication_jwt_jwksUri`, default
+`http://keycloak:8080/realms/openhie/protocol/openid-connect/certs` over the
+docker network) and caches them; an unknown `kid` triggers a refetch, so a realm
+rebuild or key rotation needs no restart and no file. If your realm is not
+`openhie`, set `KEYCLOAK_JWKS_URI` in the root `.env`.
 
 OpenHIM env (already in `docker-compose.yml`): `authentication_jwt_algorithms`
 = `RS256` (plain string), `authentication_jwt_audience` = `account`,
@@ -188,7 +186,7 @@ Just an Organization, no client: `./keycloak/create-org.sh <nhfr-id> "<name>"`.
 
 > `sub` override rejected → `onboard-hospital.sh` fails at 4/5. Fallback: OpenHIM
 > `clientID` stays the Keycloak UUID; add
-> `FACILITY_REGISTRY_JSON={"<uuid>":"<nhfr-id>"}` to `mediator/.env` +
+> `FACILITY_REGISTRY_JSON={"<uuid>":"<nhfr-id>"}` to `services/fhir-mediator/.env` +
 > `docker compose up -d --force-recreate mediator`.
 
 ---
@@ -223,7 +221,7 @@ Postman: `node keycloak/token-server.mjs`, then `http://localhost:4099/token/313
 | other | — | `415` |
 
 Channel `NP FHIR Intake`, `^/ingest/?$`, `POST`, route `fhir-intake-mediator:4003`,
-role `OPENHIM_CHANNEL_ROLE` in `fhir-intake-mediator/.env` (`np-fhir-clients` to
+role `OPENHIM_CHANNEL_ROLE` in `services/fhir-intake-mediator/.env` (`np-fhir-clients` to
 reuse §6 clients).
 
 Raw-row behaviour: `403` if no `X-OpenHIM-ClientID`;
@@ -333,7 +331,6 @@ realm key extraction in §5, and hospital onboarding in §6.
 |---|---|
 | Create the realm | `./keycloak/setup.sh` |
 | Create/update an Organization | `./keycloak/create-org.sh <nhfr-id> "<name>"` |
-| Re-extract realm key | `./keycloak/extract-realm-pubkey.sh` |
 | Onboard a hospital | `./keycloak/onboard-hospital.sh <nhfr-id> "<name>"` |
 | Hospital token | `./keycloak/get-jwt-client-token.sh <nhfr-id>` |
 | Postman token helper | `node keycloak/token-server.mjs` (`:4099`) |
@@ -347,7 +344,7 @@ realm key extraction in §5, and hospital onboarding in §6.
 | Console calls fail, network error | accept the cert — <https://localhost:8080/heartbeat> (2a) |
 | Mediator missing under **Mediators** | `OPENHIM_PASSWORD` ≠ root password (2c) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
-| `JWT could not be verified` | `realm-public.pem` stale — re-run §5 |
+| `JWT could not be verified` / `Public key not found in JWKS cache` | core cannot reach `KEYCLOAK_JWKS_URI` — `docker compose logs openhim-core` (§5) |
 | 401 at `:5000` fresh token | issuer mismatch — `iss` must exactly match `KEYCLOAK_ISSUER` (`http://localhost:8083/realms/openhie` locally; see §9 on a VPS) |
 | 403 at `:5000` | Client lacks role — re-run `onboard-hospital.sh` (§6) |
 | 404 at `:5000/ingest` | `NP FHIR Intake` channel missing — check `fhir-intake-mediator` |

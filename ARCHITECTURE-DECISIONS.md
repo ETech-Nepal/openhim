@@ -88,7 +88,7 @@ A **separate JeMPI** instance (own host, Dgraph-backed) called synchronously on
 every Patient write via `POST /crRegister` (deterministic find-or-create), with
 `POST /crCandidates` to resolve the golden UID on a duplicate. The mediator mints
 the human-facing Health ID and stores it as JeMPI's `auxId`.
-Source: `mediator/src/providers/jempiProvider.js`, `jempi-config/`,
+Source: `services/fhir-mediator/src/clients/jempi.ts`, `jempi-config/`,
 `FHIR_MEDIATOR_IMPLEMENTATION.md` §0.3.
 
 ### Why
@@ -178,7 +178,7 @@ choice.
 ### What we chose
 
 10 random digits (first 1–9) + 1 **Damm** check digit, minted by
-`mediator/src/fhir/healthId.js`, stored as JeMPI's `auxId`, and used as the key
+`services/fhir-mediator/src/modules/patient/healthId.ts`, stored as JeMPI's `auxId`, and used as the key
 for the HAPI conditional upsert. Opaque — encodes nothing.
 
 ### Pros
@@ -353,7 +353,8 @@ UI) not architectural.
 
 Hospitals authenticate to Keycloak with `private_key_jwt` (client-credentials,
 RSA keypair), get an RS256 JWT, and present it to OpenHIM, which verifies it
-**offline** against `openhim-config/realm-public.pem` and maps `sub` → OpenHIM
+against the realm JWKS (`authentication_jwt_jwksUri`, cached, refetched on an
+unknown `kid`) and maps `sub` → OpenHIM
 Client. A protocol mapper forces `sub` = the NHFR code. BFFs use OpenHIM Basic
 auth.
 
@@ -361,19 +362,18 @@ auth.
 
 - ✅ **No shared secrets with hospitals** — each holds its own private key;
   compromise is isolated and revocable per client.
-- ✅ **Offline verification** — OpenHIM makes **no runtime call to Keycloak**;
-  Keycloak can be down and existing tokens still verify.
+- ✅ **Cached verification** — OpenHIM fetches the JWKS once and refetches only
+  on an unknown `kid`; Keycloak can be down and existing tokens still verify.
 - ✅ **`sub` = NHFR code** makes facility attribution trivial and non-forgeable
   (combined with OpenHIM setting `X-OpenHIM-ClientID`).
 - ✅ Standard OIDC — hospitals' EMRs already speak it.
 
 ### Cons / risks
 
-- ⚠️ **Key rotation is manual and coupled** — a realm rebuild rotates the RS256
-  key, and you must re-run `extract-realm-pubkey.sh` + force-recreate
-  `openhim-core` or **every token fails**. This is the single most common
-  operational footgun in the setup docs.
-- ⚠️ **Offline verification means no revocation check** — a revoked/short-lived
+- ⚠️ **OpenHIM must reach Keycloak at boot / on key rotation** — the JWKS fetch
+  is an internal docker-network call; if `KEYCLOAK_JWKS_URI` names the wrong
+  realm or Keycloak is down, every token fails until it recovers.
+- ⚠️ **Signature-only verification means no revocation check** — a revoked/short-lived
   token is honoured until it expires (tokens are 60 s in the helper, but that is
   client-side).
 - ⚠️ **Keycloak `start-dev` + H2** — `docker compose down` wipes the realm and

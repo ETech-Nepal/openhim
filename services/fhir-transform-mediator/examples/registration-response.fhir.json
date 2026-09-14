@@ -1,0 +1,10 @@
+{
+  "resourceType": "Patient",
+  "id": "patient-1",
+  "identifier": [
+    {
+      "system": "http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id",
+      "value": "EXAMPLE-NHID"
+    }
+  ]
+}

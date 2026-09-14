@@ -12,17 +12,17 @@ Every patient carries **two** identifiers, mapped 1:1:
 
 | Identifier                  | System URI                                              | Made by                                                             | Role                                                                       |
 | --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **Nepal Health ID** ("HID") | `http://mohp.gov.np/fhir/NamingSystem/nepal-health-id`  | the mediator — `mediator/src/fhir/healthId.js` `generateHealthId()` | human-facing lifetime number; also the key for the HAPI conditional upsert |
+| **Nepal Health ID** ("HID") | `http://mohp.gov.np/fhir/NamingSystem/nepal-health-id`  | the mediator — `services/fhir-mediator/src/modules/patient/healthId.ts` `generateHealthId()` | human-facing lifetime number; also the key for the HAPI conditional upsert |
 | **JeMPI golden UID**        | `http://mohp.gov.np/fhir/NamingSystem/jempi-golden-uid` | JeMPI — returned by `POST /crRegister`                              | machine-side cross-source dedup key (a Dgraph hex id, e.g. `0x51`)         |
 
 > **The mediator mints the HID; JeMPI only stores it** (as the golden record's
 > `auxId`) so it round-trips on re-registration. The 1:1 mapping is maintained by
 > the mediator, not enforced by either store.
-> Source: `mediator/src/fhir/healthId.js` header, `DEMO.md` "Health ID".
+> Source: `services/fhir-mediator/src/modules/patient/healthId.ts` header, `DEMO.md` "Health ID".
 
 ## 2. HID format & check digit
 
-Source: `mediator/src/fhir/healthId.js`.
+Source: `services/fhir-mediator/src/modules/patient/healthId.ts`.
 
 - **2 random series letters** (`randomSeries()`, A–Z) + **6 random digits**
   (`randomDigits()`) = the 8-char body, then
@@ -47,12 +47,12 @@ Bundle with Patient entries — through OpenHIM.
 | Component                                                                | File                                                                   |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | route + auth + `X-OpenHIM-ClientID`                                      | OpenHIM Core (`docker-compose.yml` `authentication_*`)                 |
-| handler                                                                  | `mediator/src/handlers/patient.js` / `mediator/src/handlers/bundle.js` |
-| identity resolution (mint/reuse HID, golden UID, provenance, read-merge) | `mediator/src/fhir/patientIdentity.js` `resolvePatientIdentity()`      |
-| HID generation + validation                                              | `mediator/src/fhir/healthId.js`                                        |
-| JeMPI calls + FHIR→JeMPI mapping                                         | `mediator/src/providers/jempiProvider.js`                              |
-| HAPI I/O (conditional update, searches)                                  | `mediator/src/fhir/hapiClient.js`                                      |
-| `meta.tag` provenance                                                    | `mediator/src/fhir/provenance.js`                                      |
+| handler                                                                  | `services/fhir-mediator/src/modules/patient/handler.ts` / `services/fhir-mediator/src/modules/bundle/handler.ts` |
+| identity resolution (mint/reuse HID, golden UID, provenance, read-merge) | `services/fhir-mediator/src/modules/patient/identity.ts` `resolvePatientIdentity()`      |
+| HID generation + validation                                              | `services/fhir-mediator/src/modules/patient/healthId.ts`                                        |
+| JeMPI calls + FHIR→JeMPI mapping                                         | `services/fhir-mediator/src/clients/jempi.ts`                              |
+| HAPI I/O (conditional update, searches)                                  | `services/fhir-mediator/src/clients/hapi.ts`                                      |
+| `meta.tag` provenance                                                    | `services/fhir-mediator/src/fhir/provenance.ts`                                      |
 
 ---
 
@@ -102,7 +102,7 @@ sequenceDiagram
  participant JEMPI as JeMPI
 
  EMR->>HIM: POST /fhir/Patient (Bearer JWT)
- HIM->>HIM: verify RS256 vs realm-public.pem, iss/aud, sub to Client, match channel
+ HIM->>HIM: verify RS256 vs cached realm JWKS, iss/aud, sub to Client, match channel
  HIM->>MED: forward plus X-OpenHIM-ClientID NHFR
  Note over MED: no valid incoming HID, mint one
  loop up to 5 attempts
@@ -271,7 +271,7 @@ flowchart TD
 | incoming `nepal-health-id` present but not Damm-valid  | `patientIdentity.js`        | ignored — a fresh HID is minted                                            |
 
 Every downstream call — success or failure — is recorded as an **orchestration**
-on the OpenHIM transaction (`orch()` in `mediator/src/lib/orchestration.js`),
+on the OpenHIM transaction (`orch()` in `services/fhir-mediator/src/lib/orchestration.js`),
 visible in Console → Transactions.
 
 ---

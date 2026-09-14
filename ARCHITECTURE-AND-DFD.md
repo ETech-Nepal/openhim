@@ -29,8 +29,8 @@ Notation:
 | HAPI FHIR | `hapiproject/hapi:latest` | FHIR R4 clinical store + Tester UI | `127.0.0.1:8081` |
 | HAPI Postgres | `postgres:16-alpine` | HAPI relational store (`hapi`) + `admin_review` DB | none |
 | Keycloak | `quay.io/keycloak/keycloak:26.7.2` | RS256 JWT issuer, realm `openhie` | `127.0.0.1:8083` |
-| `mediator` (FHIR MPI Orchestrator) | `./mediator`, Node 20 | Patient to JeMPI to HID to HAPI upsert; other resources pass-through | internal `:4000` |
-| `fhir-intake-mediator` | `./fhir-intake-mediator` | `POST /ingest`: CDRS row to Bundle to orchestrator; FHIR pass-through | internal `:4003` |
+| `mediator` (FHIR MPI Orchestrator) | `./services/fhir-mediator`, Node 20 | Patient to JeMPI to HID to HAPI upsert; other resources pass-through | internal `:4000` |
+| `fhir-intake-mediator` | `./services/fhir-intake-mediator` | `POST /ingest`: CDRS row to Bundle to orchestrator; FHIR pass-through | internal `:4003` |
 | `admin-mediator` | `./admin-mediator` | duplicate review queue + merge in JeMPI **and** HAPI | internal `:4002` |
 | `patient-portal-mediator` | `./patient-portal-mediator` | read-only patient-scoped aggregate over HAPI | internal `:4001` |
 | Caddy (`caddy` / `caddy-ip`) | `caddy:2-alpine` | reverse proxy + automatic TLS, **VPS only**, profiles `vps` / `vps-ip` | `80`, `443` |
@@ -55,7 +55,7 @@ flowchart TB
     KC["Keycloak, realm openhie, RS256 JWT issuer"]
 
     subgraph him["Interoperability layer, trust boundary"]
-      HIM["OpenHIM Core. JWT verify offline vs realm-public.pem. sub to Client. channel routing. transaction log"]
+      HIM["OpenHIM Core. JWT verify vs cached realm JWKS. sub to Client. channel routing. transaction log"]
       MONGO[("MongoDB. clients, channels, transactions")]
       HIM --- MONGO
     end
@@ -104,7 +104,7 @@ flowchart TB
 |---|---|
 | Internet vs stack | Caddy (VPS) + host firewall — only `80`/`443` public in `vps` mode |
 | Client vs mediator | **OpenHIM only** — mediators have no auth of their own; no mediator publishes a host port |
-| Auth verification | OpenHIM vs `openhim-config/realm-public.pem` — offline RS256; no request-time call to Keycloak |
+| Auth verification | OpenHIM vs the realm JWKS (`authentication_jwt_jwksUri`) — RS256, keys cached in-process, refetched only on an unknown `kid` |
 | Facility identity | OpenHIM-set `X-OpenHIM-ClientID` — not forgeable; equals the NHFR code |
 | Patient scoping (portal) | `patient-portal-mediator` verifies the forwarded `X-Patient-Token` and pins to one golden UID |
 | Identity plane vs clinical plane | mediator orchestration — JeMPI resolves *who*, HAPI stores *what*; reads never touch JeMPI |
@@ -164,13 +164,12 @@ flowchart TB
     MED -.->|"or public IP"| JEMPI
     CADDY -.->|"ACME"| LE
     DNS -.->|"A records"| CADDY
-    HIM -.->|"mounts realm-public.pem"| VOLS
     KC -.->|"mounts realm-export.json"| VOLS
 ```
 
 Notes: single host, one Compose project (`name: openhim`); no orchestrator, no
 replicas; every service `restart: unless-stopped`. Bind mounts:
-`realm-public.pem` to openhim-core; `application.yaml` + `np.core-0.1.0.tgz` to
+`application.yaml` + `np.core-1.0.0.tgz` to
 fhir; `realm-export.json` to keycloak; `jempi-config/` to admin-mediator
 (read-only `/config`); each mediator's source dir to its container (`node
 --watch` dev bind mount). Caddy is profile-gated.
@@ -192,7 +191,7 @@ sequenceDiagram
     EMR->>KC: client_credentials with private_key_jwt
     KC-->>EMR: RS256 access token, sub equals NHFR code
     EMR->>HIM: POST Patient with Bearer token
-    HIM->>HIM: verify JWT vs realm-public.pem, check iss and aud, map sub to Client, match the fhir channel, check role
+    HIM->>HIM: verify JWT vs cached realm JWKS, check iss and aud, map sub to Client, match the fhir channel, check role
     HIM->>MED: forward plus X-OpenHIM-ClientID NHFR
     MED->>MED: reuse a valid incoming HID, else generateHealthId plus Damm
     MED->>HAPI: GET Patient by identifier nepal-health-id candidate, uniqueness, up to 5 times
@@ -498,8 +497,8 @@ read the patient who logged in.
 A client obtains an RS256 JWT from Keycloak (hospitals via `private_key_jwt`
 client-credentials; the demo user via password grant; the two BFFs via OpenHIM
 Basic auth). It sends the JWT as `Authorization: Bearer` on every request to
-OpenHIM Core's transaction port. OpenHIM verifies the signature offline against
-`openhim-config/realm-public.pem`, checks `iss`/`aud`, maps the token `sub` to a
+OpenHIM Core's transaction port. OpenHIM verifies the signature against the
+realm JWKS (cached; refetched on an unknown `kid`), checks `iss`/`aud`, maps the token `sub` to a
 registered OpenHIM **Client**, matches the URL against a **channel**, checks the
 Client's role against the channel's `allow` list, and forwards to the mediator on
 the internal Docker network — injecting the non-forgeable `X-OpenHIM-ClientID`.

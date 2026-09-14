@@ -114,6 +114,9 @@ services:
       # http://<VPS_IP>, matching the Caddy route in Caddyfile.ip.
       KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8083}"
       KC_HOSTNAME_STRICT: "false"
+      # DPoP-bound access tokens (RFC 9449). Clients created by keycloak/create-jwt-client.sh
+      # opt in per client; fhir-gateway-mediator verifies the proof.
+      KC_FEATURES: dpop
       KC_PROXY_HEADERS: xforwarded
     # Bound to 8083 on localhost only — matches authentication_jwt_issuer below.
     # Keycloak 26 has no /auth prefix.
@@ -146,25 +149,17 @@ services:
       api_authenticationTypes: '["local","basic","token","openid"]'
       # ── Keycloak JWT client authentication (transaction layer, ports 5000/5001) ──
       # Clients present a Keycloak-issued RS256 token as `Authorization: Bearer <jwt>`.
-      # OpenHIM verifies it with the realm public key below (no runtime call to Keycloak),
-      # then maps the token's `sub` claim to a registered OpenHIM Client.
+      # OpenHIM fetches the realm signing keys from the JWKS endpoint (cached; refetched
+      # on an unknown `kid`, so key rotation needs no restart), then maps the token's
+      # `sub` claim to a registered OpenHIM Client.
       authentication_enableJWTAuthentication: "true"
       # NOTE: OpenHIM does algorithms.split(' ') / audience.split(' ') — these must be
       # plain, space-separated strings, NOT JSON arrays. '["RS256"]' would break verification.
       authentication_jwt_algorithms: "RS256"
       authentication_jwt_issuer: "${KEYCLOAK_ISSUER:-http://localhost:8083/realms/openhie}"
       authentication_jwt_audience: "account"
-      # authentication_jwt_secretOrPublicKey is NOT set inline. It is injected at boot
-      # from the mounted realm-public.pem (see entrypoint below), so the Keycloak realm
-      # public key lives in exactly one file. To rotate it, replace that one .pem.
-    # Wrap the image's default entrypoint: export the key from the mounted file, then
-    # hand off to the original docker-entrypoint.sh + CMD (node lib/server.js).
-    entrypoint:
-      - /bin/sh
-      - -c
-      - export authentication_jwt_secretOrPublicKey="$(cat /etc/openhim/realm-public.pem)"; exec docker-entrypoint.sh node lib/server.js
-    volumes:
-      - ./openhim-config/realm-public.pem:/etc/openhim/realm-public.pem:ro
+      # Internal docker-network URL: the realm segment must match KEYCLOAK_ISSUER's realm.
+      authentication_jwt_jwksUri: "${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/openhie/protocol/openid-connect/certs}"
     ports:
       - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
       - "5000:5000"   # Secure transaction port (HTTPS)
@@ -228,14 +223,11 @@ services:
     depends_on:
       hapi-db:
         condition: service_healthy
-    # TEMP (demo): HAPI Tester UI exposed for end-to-end proof — search Patient by
-    # bima-insurance-number, show the generated Health ID + linked Encounter.
-    # REVERT after the demo: this is unauthenticated read/write on the FHIR store.
-    ports:
-      - "8081:8080"
+    # No host port. All FHIR traffic goes through OpenHIM -> fhir-gateway-mediator (see below).
+    # Publishing 8080 here would allow unauthenticated read/write on the FHIR store.
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
-      - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro
+      - ./hapi-config/np.core-1.0.0.tgz:/app/config/np.core-1.0.0.tgz:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/fhir/metadata || exit 1"]
       interval: 30s
@@ -244,22 +236,22 @@ services:
 
   # ── FHIR MPI Orchestrator mediator ──
   # Runs in Docker on the `openhim` network. OpenHIM reaches it at mediator:4000
-  # (the channel route host, see MEDIATOR_ROUTE_HOST in mediator/.env). It
+  # (the channel route host, see MEDIATOR_ROUTE_HOST in services/fhir-mediator/.env). It
   # self-registers its role + channel with OpenHIM on startup.
-  # See FHIR_MEDIATOR_IMPLEMENTATION.md and mediator/README.md.
+  # See FHIR_MEDIATOR_IMPLEMENTATION.md and services/fhir-mediator/README.md.
   mediator:
     container_name: mediator
     build:
-      context: ./mediator
+      context: ./services/fhir-mediator
     restart: unless-stopped
     networks:
       - openhim
     volumes:
-      - "./mediator:/app"
+      - "./services/fhir-mediator:/app"
       - "/app/node_modules"
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
     env_file:
-      - ./mediator/.env
+      - ./services/fhir-mediator/.env
     # No host port. OpenHIM reaches it at mediator:4000 internally. The mediator has
     # no auth of its own — it trusts OpenHIM's channel/role check — so a published
     # port lets anyone write to the FHIR store bypassing auth. Debug-only: "4000:4000".
@@ -273,24 +265,49 @@ services:
   # Orchestrator above (reached at mediator:4000 on the openhim network). It derives
   # the NHFR facility from X-OpenHIM-ClientID and never trusts an inbound X-NHFR-ID.
   # No host port — OpenHIM reaches it at fhir-intake-mediator:4003. See
-  # fhir-intake-mediator/README.md.
+  # services/fhir-intake-mediator/README.md.
   fhir-intake-mediator:
     container_name: fhir-intake-mediator
     build:
-      context: ./fhir-intake-mediator
+      context: ./services/fhir-intake-mediator
     restart: unless-stopped
     networks:
       - openhim
     volumes:
-      - "./fhir-intake-mediator:/app"
+      - "./services/fhir-intake-mediator:/app"
       - "/app/node_modules"
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
     env_file:
-      - ./fhir-intake-mediator/.env
+      - ./services/fhir-intake-mediator/.env
     depends_on:
       openhim-core:
         condition: service_started
       mediator:
+        condition: service_started
+
+  # ── FHIR Gateway mediator ──
+  # Owns the /fhir channels (openhim-config/hapi-channels.json is the same list it
+  # self-registers from src/channels.ts). OpenHIM enforces who may hit which URL/method
+  # via those per-role channels (client roles `ehr`, `patient`); this mediator verifies
+  # the Keycloak JWT against the realm JWKS, verifies the DPoP proof when the token is
+  # sender-constrained (cnf.jkt), and proxies to fhir:8080. Reached at fhir-gateway-mediator:4004.
+  fhir-gateway-mediator:
+    container_name: fhir-gateway-mediator
+    build:
+      context: ./services/fhir-gateway-mediator
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./services/fhir-gateway-mediator:/app"
+      - "/app/node_modules"
+    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
+    env_file:
+      - ./services/fhir-gateway-mediator/.env
+    depends_on:
+      openhim-core:
+        condition: service_started
+      fhir:
         condition: service_started
 
   # ── Patient Admin Review mediator ──

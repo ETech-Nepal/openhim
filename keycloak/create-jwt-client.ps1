@@ -7,7 +7,7 @@
   Create a Keycloak client that authenticates via private_key_jwt (client-jwt) -
   machine-to-machine, no password. Generates an RSA keypair with .NET, registers
   the public half on the Keycloak client, and prints the service-account sub to
-  register as an OpenHIM Client (see mediator/scripts/create-hip-client.js).
+  register as an OpenHIM Client (see services/fhir-mediator/src/scripts/create-hip-client.ts).
 
   Keys land in keycloak\keys\ in the same PEM formats the bash script produces,
   so the two are interchangeable.
@@ -88,7 +88,7 @@ Write-Host "Private key (keep this, don't commit): $priv"
 Write-Host "Service-account sub (register as OpenHIM clientID): $sub"
 Write-Host ''
 Write-Host 'Register with OpenHIM:'
-Write-Host "  docker exec -e HIP_CLIENT_SUB=$sub -e HIP_CLIENT_NAME=`"$ClientId`" mediator node scripts/create-hip-client.js"
+Write-Host "  docker exec -e HIP_CLIENT_SUB=$sub -e HIP_CLIENT_NAME=`"$ClientId`" mediator node dist/scripts/create-hip-client.js"
 Write-Host ''
 Write-Host 'Get a token:'
 Write-Host "  pwsh -File .\keycloak\get-jwt-client-token.ps1 $ClientId"

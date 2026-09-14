@@ -60,14 +60,14 @@ else
 fi
 cd "$DEST"
 
-if [ ! -d fhir-intake-mediator ]; then
-  echo "!! WARNING: fhir-intake-mediator/ not in branch '$BRANCH'."
+if [ ! -d services/fhir-intake-mediator ]; then
+  echo "!! WARNING: services/fhir-intake-mediator/ not in branch '$BRANCH'."
   echo "!! The FHIR Intake mediator, onboard-hospital.sh and Model B changes are"
   echo "!! not committed yet. Push a deploy branch first, then re-run with BRANCH=<it>."
 fi
 
 # ── 3. .env files ────────────────────────────────────────────────────────────
-for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; do
+for d in services/fhir-mediator admin-mediator patient-portal-mediator services/fhir-intake-mediator; do
   [ -d "$d" ] || continue
   if [ -f "$d/.env" ]; then
     echo "keep  $d/.env"
@@ -76,12 +76,6 @@ for d in mediator admin-mediator patient-portal-mediator fhir-intake-mediator; d
     echo "made  $d/.env   <- EDIT before starting"
   fi
 done
-
-# Realm public key is injected by SETUP §5. Git does not retain the otherwise
-# empty directory because the generated PEM is ignored, so create it before
-# adding the placeholder bind-mount file. JWT auth fails until §5 runs.
-mkdir -p openhim-config
-[ -f openhim-config/realm-public.pem ] || { touch openhim-config/realm-public.pem; echo "made  openhim-config/realm-public.pem (placeholder)"; }
 
 # root .env for docker compose variable substitution (Caddy DOMAIN / VPS_IP)
 if [ -n "$DOMAIN" ] && ! grep -qs '^DOMAIN=' .env 2>/dev/null; then
@@ -165,7 +159,6 @@ Edit these, THEN start  (SETUP.md §3):
  6. docker compose --profile vps up -d && docker compose ps
     (--profile vps also starts Caddy)
 
- 7. SETUP §5 root password + propagate  ->  §6 realm  ->  §7 extract-realm-pubkey.sh
     ->  §8 JeMPI (wg peer / public-IP fallback)  ->  §9 onboard-hospital.sh
 ────────────────────────────────────────────────────────────────────────────
 EOF

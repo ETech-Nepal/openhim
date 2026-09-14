@@ -1,0 +1,44 @@
+name: Validate priority mediators
+
+on:
+  pull_request:
+    paths:
+      - 'services/fhir-mediator/**'
+      - 'services/fhir-intake-mediator/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/**'
+  push:
+    paths:
+      - 'services/fhir-mediator/**'
+      - 'services/fhir-intake-mediator/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/**'
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [fhir-intake-mediator, fhir-mediator]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - run: docker build .

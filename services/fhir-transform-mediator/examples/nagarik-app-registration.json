@@ -1,0 +1,25 @@
+{
+  "requestId": "NAG-2026-09-14-0001842",
+  "source": "nagarik-app",
+  "citizen": {
+    "nationalId": "1234-5678-9012-3",
+    "citizenshipNumber": "12-34-56-78901",
+    "healthInsuranceNumber": "HIB-000123456",
+    "nameEn": { "given": "Aarav", "family": "Shrestha" },
+    "nameNe": { "given": "आरव", "family": "श्रेष्ठ" },
+    "gender": "M",
+    "dobBS": "2047-02-01",
+    "dobAD": "1990-05-15",
+    "casteEthnicityCode": "1",
+    "mobile": "+9779801234567",
+    "email": "aarav.shrestha@example.com",
+    "permanentAddress": {
+      "provinceCode": "3",
+      "districtCode": "306",
+      "localLevelCode": "30608",
+      "wardNo": 10,
+      "tole": "Naxal",
+      "postalCode": "44600"
+    }
+  }
+}

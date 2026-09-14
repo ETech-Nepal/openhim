@@ -40,11 +40,11 @@ It does **not** cover the hospital clients — `hospital-1/2/3` and
 `openhim-client` each carry a real generated RSA keypair that can't be
 pre-baked into a static file. If the realm does get wiped, still re-run
 steps 3-3b below for those: every hospital client, its keypair, and the
-`FACILITY_REGISTRY_JSON` mapping in `mediator/.env` need recreating (the subs
+`FACILITY_REGISTRY_JSON` mapping in `services/fhir-mediator/.env` need recreating (the subs
 change every time the realm is rebuilt). Budget 5 minutes for this if it
 happens right before you go on stage.
 
-**Also note:** after editing `mediator/.env` (e.g. updating
+**Also note:** after editing `services/fhir-mediator/.env` (e.g. updating
 `FACILITY_REGISTRY_JSON`), `docker compose restart mediator` is **not
 enough** — `restart` doesn't reload `env_file`. Use
 `docker compose up -d --force-recreate mediator`.
@@ -78,7 +78,7 @@ just confirm it happened:
 - **Channels** tab → `NP FHIR Orchestrator` channel exists, `urlPattern: ^/fhir(/.*)?$`
 
 If a mediator's channel is missing/stale: it upserts on every restart
-(`docker compose restart mediator`) — see `mediator/src/openhim.js` `syncChannels()`.
+(`docker compose restart mediator`) — see `services/fhir-mediator/src/openhim/registration.ts` `syncChannels()`.
 
 ---
 
@@ -90,18 +90,14 @@ try step 3a and see if it says "already exists"):
 
 ```bash
 ./keycloak/setup.sh                      # creates realm `openhie`, demo-client, demo user
-./keycloak/extract-realm-pubkey.sh       # writes openhim-config/realm-public.pem
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator
 ```
 
-**Why this order matters:** OpenHIM verifies JWTs against the realm's public key
-read from a *file* at boot (`openhim-config/realm-public.pem`), not a live call to
-Keycloak. Recreating the realm always rotates its RSA keypair, so the file must be
-re-extracted and OpenHIM force-recreated (a plain restart won't reload env/mounts)
-every time the realm is rebuilt. Force-recreating `openhim-core` changes its
-internal IP, which is why the other mediators need a restart right after — otherwise
-their heartbeat starts failing.
+OpenHIM fetches the realm's RS256 signing keys from the Keycloak JWKS endpoint
+(`authentication_jwt_jwksUri`, default
+`http://keycloak:8080/realms/openhie/protocol/openid-connect/certs` over the
+docker network) and caches them; an unknown `kid` triggers a refetch, so a realm
+rebuild or key rotation needs no restart and no file. If your realm is not
+`openhie`, set `KEYCLOAK_JWKS_URI` in the root `.env`.
 
 ### 3a. Provision a hospital client (machine-to-machine, no password)
 
@@ -118,7 +114,7 @@ the Client ID:
 
 ```bash
 docker exec -e HIP_CLIENT_SUB=<sub-from-above> -e HIP_CLIENT_NAME="hospital-1" \
-  mediator node scripts/create-hip-client.js
+  mediator node dist/scripts/create-hip-client.js
 ```
 
 Repeat per hospital (`hospital-2`, `hospital-3`, ...). Each hospital's private key
@@ -127,7 +123,7 @@ don't keep long-term copies once it's theirs.
 
 ### 3b. Facility lock (hospital can't claim to be another hospital)
 
-Map each hospital's sub → its facility code in `mediator/.env`:
+Map each hospital's sub → its facility code in `services/fhir-mediator/.env`:
 
 ```
 FACILITY_REGISTRY_JSON={"<sub>":"hospital-1", "<sub2>":"hospital-2", ...}
@@ -197,7 +193,7 @@ Hospital  --Bearer JWT-->  OpenHIM (verify sig, map sub->Client, route by channe
 
 ### Health ID — what it is and what it's for
 
-`Patient.id` in the response, e.g. `61173077335` (`mediator/src/fhir/healthId.js`):
+`Patient.id` in the response, e.g. `61173077335` (`services/fhir-mediator/src/modules/patient/healthId.ts`):
 
 - **10 random digits**, first digit 1-9. Deliberately opaque — encodes *nothing*
   about the patient (no DOB, no gender, no facility baked in). Privacy by design:
@@ -303,7 +299,7 @@ Found during dry run: when JeMPI dedups the *same person* submitted by two
 *different* hospitals (step 7), HAPI's default PUT behavior **unions**
 `meta.tag` entries rather than replacing them — so the merged record ends up
 with **two** `source-facility` tags (one per hospital that ever wrote it),
-not just the latest. `mediator/src/fhir/provenance.js` already dedupes by
+not just the latest. `services/fhir-mediator/src/fhir/provenance.ts` already dedupes by
 system on the object it sends; the duplication happens server-side in HAPI's
 merge, after that. Cosmetic/provenance-hygiene issue, not a security hole —
 the facility *lock* itself still works correctly on every individual write
@@ -318,9 +314,8 @@ during the demo, that's why. Not fixed yet — flag, don't block on it.
 | What | Where |
 |---|---|
 | Keycloak realm/client/user setup | `keycloak/setup.sh` |
-| Regenerate OpenHIM's trusted pubkey | `keycloak/extract-realm-pubkey.sh` |
 | New hospital client (keypair + Keycloak client) | `keycloak/create-jwt-client.sh <id>` |
 | Get a token for a private_key_jwt client | `keycloak/get-jwt-client-token.sh <id>` |
-| Register a Keycloak sub as an OpenHIM Client | `mediator/scripts/create-hip-client.js` |
+| Register a Keycloak sub as an OpenHIM Client | `services/fhir-mediator/src/scripts/create-hip-client.ts` |
 | Private keys (gitignored) | `keycloak/keys/*.key.pem` |
 | Demo human user (password grant) | `demo` / `demo123` on client `demo-client` |

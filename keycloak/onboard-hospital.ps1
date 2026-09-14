@@ -68,7 +68,7 @@ if ($sub -ne $Nhfr) { throw "   FAIL: token sub is '$sub', expected '$Nhfr'" }
 Write-Host "   token sub = $sub"
 
 Write-Host '== 5/5  OpenHIM Client =='
-docker exec -e "HIP_CLIENT_SUB=$Nhfr" -e "HIP_CLIENT_NAME=$Name" mediator node scripts/create-hip-client.js
+docker exec -e "HIP_CLIENT_SUB=$Nhfr" -e "HIP_CLIENT_NAME=$Name" mediator node dist/scripts/create-hip-client.js
 if ($LASTEXITCODE -ne 0) { throw "create-hip-client.js failed (exit $LASTEXITCODE)" }
 
 Write-Host ''

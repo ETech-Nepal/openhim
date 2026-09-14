@@ -113,10 +113,10 @@ the first `docker compose up` (§2).
 ### 1a. Mediator `.env` files
 
 ```powershell
-Copy-Item mediator\.env.example                mediator\.env
+Copy-Item services\fhir-mediator\.env.example                services\fhir-mediator\.env
 Copy-Item admin-mediator\.env.example          admin-mediator\.env
 Copy-Item patient-portal-mediator\.env.example patient-portal-mediator\.env
-Copy-Item fhir-intake-mediator\.env.example    fhir-intake-mediator\.env
+Copy-Item services\fhir-intake-mediator\.env.example    services\fhir-intake-mediator\.env
 ```
 
 **Leave them exactly as shipped.** Every default is correct for a local Docker
@@ -138,48 +138,6 @@ crash-loop — expected (§2), and nothing before §3b can fix it.
 
 > `.env` is in `.gitignore`. Never commit one — they hold the OpenHIM root
 > password.
-
-### 1b. Pre-create `openhim-config\realm-public.pem` — do not skip
-
-Run this **before the first `docker compose up`**:
-
-```powershell
-New-Item -ItemType Directory -Force openhim-config | Out-Null
-if (-not (Test-Path openhim-config\realm-public.pem)) {
-  New-Item -ItemType File openhim-config\realm-public.pem | Out-Null
-}
-```
-
-Then confirm it is a **file**, not a directory — `Mode` must not begin with `d`:
-
-```powershell
-Get-Item openhim-config\realm-public.pem | Select-Object Mode, Length, Name
-```
-
-An empty file (`Length` 0) is correct at this point; §6 writes the real key into
-it.
-
-**Why.** `docker-compose.yml` bind-mounts `./openhim-config/realm-public.pem`
-into `openhim-core`. `*.pem` is gitignored and `openhim-config/` has no tracked
-files, so after a fresh clone that path does not exist — and Docker creates a
-missing bind-mount target as a **directory**. Creating the file yourself first is
-what stops that.
-
-The `Test-Path` guard matters on a re-run: `New-Item -ItemType File -Force` would
-**truncate an existing key**.
-
-**What can go wrong.** If you skipped it, Docker will have made the directory,
-`openhim-core`'s entrypoint runs `cat` on it, gets nothing,
-`authentication_jwt_secretOrPublicKey` ends up empty, and every token fails at
-the transaction port with:
-
-```
-JWT could not be verified: secret or public key must be provided
-```
-
-On a fresh clone that is guaranteed, not bad luck. The recovery — stop
-`openhim-core`, `Remove-Item -Recurse` the directory, re-run §6 — is in the
-Windows gotcha note in §6.
 
 ### 1c. Root `.env` — VPS only, skip it locally
 
@@ -264,7 +222,7 @@ have to reset Core's Mongo database (§11) to get back to a known password.
 ### 3c. Propagate to mediators
 
 ```powershell
-foreach ($d in 'mediator','admin-mediator','patient-portal-mediator','fhir-intake-mediator') {
+foreach ($d in 'services/fhir-mediator','admin-mediator','patient-portal-mediator','services/fhir-intake-mediator') {
   (Get-Content "$d\.env") -replace '^OPENHIM_PASSWORD=.*', 'OPENHIM_PASSWORD=<your-password>' |
     Set-Content "$d\.env"
 }
@@ -298,7 +256,7 @@ curl.exe http://202.51.71.81:50000/JeMPI/countRecords
 
 ```powershell
 $JEMPI = 'http://202.51.71.81:50000/JeMPI'
-foreach ($f in '.\mediator\.env', '.\admin-mediator\.env') {
+foreach ($f in '.\services\fhir-mediator\.env', '.\admin-mediator\.env') {
   $c = Get-Content -Raw -LiteralPath $f
   $c = if ($c -match '(?m)^JEMPI_BASE_URL=') { $c -replace '(?m)^JEMPI_BASE_URL=.*$', "JEMPI_BASE_URL=$JEMPI" }
        else { $c.TrimEnd() + "`nJEMPI_BASE_URL=$JEMPI" }
@@ -337,7 +295,7 @@ reaches a public IP through Docker's NAT with no extra rules — the Linux
 
 **What can go wrong.**
 
-- Setting only one of the two files. `mediator\.env` **and**
+- Setting only one of the two files. `services\fhir-mediator\.env` **and**
   `admin-mediator\.env` both need `JEMPI_BASE_URL`; missing one is the usual
   cause of the `502` in §8.
 - Using `restart` instead of `--force-recreate` — the container keeps the old
@@ -391,7 +349,7 @@ Check whether the realm already exists:
 ```
 
 If it prints `http://localhost:8083/realms/openhie`, the realm exists — skip the
-next command and continue at **§6**. Otherwise create it:
+next command and continue at **§7**. Otherwise create it:
 
 ```powershell
 pwsh -File .\keycloak\setup.ps1
@@ -409,29 +367,22 @@ prints the demo user's `sub`. A password-grant demo token, no `jq` needed:
    -Body @{ grant_type='password'; client_id='demo-client'; username='demo'; password='demo123' }).access_token
 ```
 
-**What can go wrong.** Do **not** jump from here to §7. §6 is required even when
-the realm already exists, because `realm-public.pem` is created empty in §1b and
-only §6 fills it. Skipping it makes every call to `:5000` fail with 401 and
-`JWT could not be verified: secret or public key must be provided`.
 
 ---
 
-## 6. Realm key into OpenHIM
+## 6. Realm keys into OpenHIM
 
-```powershell
-pwsh -File .\keycloak\extract-realm-pubkey.ps1
-docker compose up -d --force-recreate openhim-core
-docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-```
-
-**Why.** OpenHIM verifies every token against Keycloak's realm public key, which
-it reads from the `realm-public.pem` bind-mount (§1b). The matching settings are
+Nothing to run. OpenHIM fetches the realm's RS256 signing keys from the Keycloak
+JWKS endpoint (`authentication_jwt_jwksUri`, default
+`http://keycloak:8080/realms/openhie/protocol/openid-connect/certs` over the
+docker network) and caches them; an unknown `kid` triggers a refetch, so a realm
+rebuild or key rotation needs no restart and no file. The other settings are
 already in `docker-compose.yml`: `authentication_jwt_algorithms` = `RS256`
 (plain string), `authentication_jwt_audience` = `account`,
 `authentication_jwt_issuer` = `http://localhost:8083/realms/openhie`.
 
-A realm rebuild rotates Keycloak's RSA key → re-run this step or every token
-fails `JWT could not be verified`.
+If your realm is not `openhie`, set `KEYCLOAK_JWKS_URI` in the root `.env` to
+the matching internal URL.
 
 **What can go wrong.** Transaction-port errors and what they mean:
 
@@ -440,21 +391,6 @@ fails `JWT could not be verified`.
 | 401 | token missing / bad signature / issuer or audience mismatch |
 | 403 | Client mapped, but lacks a channel role |
 | 404 | no channel matched the URL |
-
-> **Windows gotcha.** If Docker Desktop started the stack before
-> `realm-public.pem` existed, it created an empty **directory** at
-> `openhim-config\realm-public.pem` (§1b) and no key can be written there.
-> Recover with:
->
-> ```powershell
-> docker compose stop openhim-core
-> Remove-Item -Recurse -Force .\openhim-config\realm-public.pem
-> pwsh -File .\keycloak\extract-realm-pubkey.ps1
-> docker compose up -d --force-recreate openhim-core
-> docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
-> ```
->
-> Doing §1b before the first `docker compose up` avoids this entirely.
 
 ---
 
@@ -495,7 +431,7 @@ Script overrides via environment: `KEYCLOAK_URL` (default
 
 - `sub` override rejected → `onboard-hospital.ps1` fails at 4/5. Fallback:
   OpenHIM `clientID` stays the Keycloak UUID; add
-  `FACILITY_REGISTRY_JSON={"<uuid>":"<nhfr-id>"}` to `mediator\.env` +
+  `FACILITY_REGISTRY_JSON={"<uuid>":"<nhfr-id>"}` to `services\fhir-mediator\.env` +
   `docker compose up -d --force-recreate mediator`.
 - NHFR system string mismatch: the deployed stack uses
   `http://mohp.gov.np/fhir/NamingSystem/nhfr` (NP Core's canonical is
@@ -566,7 +502,7 @@ comes back as a **byte array** for `application/fhir+json` — use
 **Why.** It lets a hospital push raw CDRS rows without building FHIR itself, while
 still going through the same OpenHIM auth and audit path. Channel
 `NP FHIR Intake`, `^/ingest/?$`, `POST`, route `fhir-intake-mediator:4003`, role
-`OPENHIM_CHANNEL_ROLE` in `fhir-intake-mediator\.env` (`np-fhir-clients` to reuse
+`OPENHIM_CHANNEL_ROLE` in `services\fhir-intake-mediator\.env` (`np-fhir-clients` to reuse
 §7 clients).
 
 **What can go wrong.** Raw-row behaviour is strict by design: `403` if no
@@ -767,15 +703,12 @@ address. `docker-compose.yml` carries a commented block with this shape.
 `https://console.example.org` but every API call fails — which looks like a login
 problem rather than a config problem.
 
-### 10f. Realm, key and onboarding on the VPS
+### 10f. Realm and onboarding on the VPS
 
-After changing the root `.env`, re-extract the realm key and recreate the
-dependants **on the VPS**:
+After changing the root `.env`, recreate the dependants **on the VPS**:
 
 ```powershell
 docker compose --profile vps up -d --force-recreate keycloak openhim-core
-pwsh -File .\keycloak\extract-realm-pubkey.ps1
-docker compose --profile vps up -d --force-recreate openhim-core
 docker compose restart mediator admin-mediator patient-portal-mediator fhir-intake-mediator
 ```
 
@@ -787,7 +720,7 @@ pwsh -File .\keycloak\onboard-hospital.ps1 3130400221 "Bharatpur Hospital"
 ```
 
 **Why.** Keycloak's `8083` stays bound to `127.0.0.1`, so the onboarding scripts
-keep working unchanged on the VPS itself against `http://localhost:8083` — §5, §6
+keep working unchanged on the VPS itself against `http://localhost:8083` — §5
 and §7 as written. Only the *advertised* URLs change:
 
 ```powershell
@@ -895,7 +828,7 @@ docker compose down -v --rmi all      # containers + volumes + images
 ```
 
 Then run, in order: **§2** → **§3b** and **§3c** (root password is back to
-`openhim-password`, so it must be reset and re-propagated) → **§5** → **§6** →
+`openhim-password`, so it must be reset and re-propagated) → **§5** →
 **§7** per hospital → **§8** to verify.
 
 **Why.** This is the one time `down` is correct: deliberate destruction, not the
@@ -909,7 +842,6 @@ What survives on disk versus what you must redo:
 |---|---|
 | `keycloak\keys\*.pem` | **survives** — `create-jwt-client.ps1` reuses an existing keypair and re-registers its public key, so hospitals keep the private key you already issued |
 | `*/.env` | **survives**, but `OPENHIM_PASSWORD` is now wrong — the root password resets to `openhim-password` |
-| `openhim-config\realm-public.pem` | survives as a **stale** key — the new realm has a new RSA keypair, so §6 is mandatory |
 | Keycloak realm, clients, mappers | gone — re-run §5, then §7 per hospital |
 | OpenHIM clients, channels, transactions | gone — §7 recreates the clients |
 | HAPI Patients / Encounters / Organizations | gone — §7 recreates the Organizations |
@@ -918,10 +850,6 @@ What survives on disk versus what you must redo:
 
 **What can go wrong.**
 
-> Only if you also deleted `openhim-config\` do you need **§1b** again — a plain
-> `down -v` leaves that host file in place, so the directory trap does not
-> re-fire. Deleting the folder without recreating the file puts you straight back
-> into it.
 >
 > JeMPI keeps the golden records from your earlier runs, so a "fresh" stack will
 > still match against previously registered patients. To confirm what is there:
@@ -938,9 +866,9 @@ Anything not listed here is Docker-internal and should stay as shipped —
 | File | Variable | Set it to | Step |
 |---|---|---|---|
 | all four | `OPENHIM_PASSWORD` | the OpenHIM root password from §3b — **blank in the examples**, mediators crash-loop until it is filled | §3c |
-| `mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` | §4 |
+| `services\fhir-mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` | §4 |
 | `admin-mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` — missing here is the usual cause of the §8 `502` | §4 |
-| `mediator\.env` | `FACILITY_REGISTRY_JSON` | `{"<keycloak-uuid>":"<nhfr-id>"}`, only when the `sub` override fails | §7 |
+| `services\fhir-mediator\.env` | `FACILITY_REGISTRY_JSON` | `{"<keycloak-uuid>":"<nhfr-id>"}`, only when the `sub` override fails | §7 |
 | `patient-portal-mediator\.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` | — |
 
 `mediator` and `fhir-intake-mediator` both bind to `np-fhir-clients` — the role
@@ -956,7 +884,6 @@ A `.env` edit takes effect only on `docker compose up -d --force-recreate <svc>`
 |---|---|
 | Clone | `git clone https://github.com/ETech-Nepal/openhim.git` |
 | Create the `.env` files | `Copy-Item <svc>\.env.example <svc>\.env` (§1a) |
-| Pre-create the key file | `New-Item -ItemType File openhim-config\realm-public.pem` (§1b) |
 | Bring the stack up | `docker compose up -d` |
 | Bring it up on a VPS, behind Caddy | `docker compose --profile vps up -d` (§10) |
 | Raw-IP test front door (HTTP) | `docker compose --profile vps-ip up -d` (§10i) |
@@ -965,7 +892,6 @@ A `.env` edit takes effect only on `docker compose up -d --force-recreate <svc>`
 | Reload a changed `.env` | `docker compose up -d --force-recreate <svc>` |
 | Create the realm | `pwsh -File .\keycloak\setup.ps1` |
 | Create/update an Organization | `pwsh -File .\keycloak\create-org.ps1 <nhfr-id> "<name>"` |
-| Re-extract realm key | `pwsh -File .\keycloak\extract-realm-pubkey.ps1` |
 | Onboard a hospital | `pwsh -File .\keycloak\onboard-hospital.ps1 <nhfr-id> "<name>"` |
 | Hospital token | `.\keycloak\get-jwt-client-token.ps1 <nhfr-id>` |
 | Postman token helper | `node keycloak\token-server.mjs` (`:4099`) |
@@ -990,10 +916,7 @@ directly.
 | Mediator crash-loops on boot | `.env` missing or `OPENHIM_PASSWORD` blank (§1) |
 | `.env` change ignored | used `restart`, not `up -d --force-recreate` |
 | a failed call "returns" your own request JSON | that is OpenHIM's error body, not a diagnosis — get the status code + `docker compose logs openhim-core` (§8) |
-| `JWT could not be verified: secret or public key must be provided` | OpenHIM has **no** key loaded — `realm-public.pem` is empty or a directory, see the next row |
-| `realm-public.pem` is a directory | Docker created it as a mount target before §1b ran — recovery block in §6 |
-| everything 401s right after a rebuild | new realm = new RSA key, and `realm-public.pem` is stale — re-run §6 (§11) |
-| `JWT could not be verified` (other) | `realm-public.pem` stale — re-run §6 |
+| `JWT could not be verified` / `Public key not found in JWKS cache` | core cannot reach `KEYCLOAK_JWKS_URI` (realm name wrong, or Keycloak down) — `docker compose logs openhim-core` (§6) |
 | 401 at `:5000` fresh token | issuer mismatch — `iss` must equal `authentication_jwt_issuer` (`http://localhost:8083/realms/openhie` locally; on a VPS, `KEYCLOAK_PUBLIC_URL` / `KEYCLOAK_ISSUER` in the root `.env`, §10b) |
 | `caddy` missing from `docker compose ps` | the profile flag was omitted — `docker compose --profile vps up -d` (§10d) |
 | Caddy logs ACME / `obtain certificate` failures | the name does not resolve to this host yet, or `:80` is blocked — fix DNS and the firewall (§10a, §10g) |
