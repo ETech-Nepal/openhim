@@ -55,17 +55,3 @@ export function toFhir(
     period: { start: value.start },
   };
 }
-
-export function fromFhir(
-  input: unknown,
-  _options: Record<string, string>,
-): Record<string, unknown> {
-  const value = z
-    .object({
-      resourceType: z.literal("Encounter"),
-      id: z.string().regex(/^[A-Za-z0-9\-.]{1,64}$/),
-      status: statuses,
-    })
-    .parse(input);
-  return { encounterReference: `Encounter/${value.id}`, status: value.status };
-}

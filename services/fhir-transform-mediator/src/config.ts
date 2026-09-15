@@ -26,7 +26,6 @@ const endpoint = z
     timeoutMs: z.number().int().min(10).max(120000).default(15000),
   })
   .strict();
-const identifierSystem = httpUrl;
 const integrationSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/),
@@ -35,21 +34,12 @@ const integrationSchema = z
       .string()
       .refine((name) => Object.hasOwn(mappings, name), "Unknown mapping"),
     role: z.string().min(1),
-    allowedClients: z.array(z.string().min(1)).min(1),
     options: z.record(z.string()),
-    destination: endpoint.optional(),
     validation: endpoint
       .extend({
         requestProfile: z.string().url().optional(),
-        responseProfile: z.string().url().optional(),
       })
       .optional(),
-    lookup: endpoint
-      .extend({
-        matchIdentifierSystems: z.array(identifierSystem).min(1),
-      })
-      .optional(),
-    forwardIdempotencyKey: z.boolean().default(false),
   })
   .strict();
 
@@ -113,18 +103,10 @@ export function parseIntegrations(
   return definitions.map((value) => ({
     ...value,
     options: mappings[value.mapping].options.parse(value.options),
-    destination: value.destination ? resolve(value.destination) : undefined,
     validation: value.validation
       ? {
           ...resolve(value.validation),
           requestProfile: value.validation.requestProfile,
-          responseProfile: value.validation.responseProfile,
-        }
-      : undefined,
-    lookup: value.lookup
-      ? {
-          ...resolve(value.lookup),
-          matchIdentifierSystems: value.lookup.matchIdentifierSystems,
         }
       : undefined,
   }));

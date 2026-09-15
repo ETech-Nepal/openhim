@@ -10,10 +10,6 @@ export type Mapping = {
     input: unknown,
     options: Record<string, string>,
   ): Record<string, unknown>;
-  fromFhir(
-    input: unknown,
-    options: Record<string, string>,
-  ): Record<string, unknown>;
 };
 
 // New source contracts add a versioned mapping here; the executor stays unchanged.

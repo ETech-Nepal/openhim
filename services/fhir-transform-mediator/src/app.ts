@@ -1,13 +1,7 @@
 import express, { type ErrorRequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import type { Config, Integration } from "./config.js";
-import {
-  execute,
-  failure,
-  transform,
-  type Context,
-  type Result,
-} from "./execute.js";
+import { execute, failure, type Context, type Result } from "./execute.js";
 import type { Transport } from "./http.js";
 
 export function createApp(
@@ -53,9 +47,8 @@ export function createApp(
       });
   }
 
-  app.use((req, res, next) => {
+  app.use((_req, res, next) => {
     res.locals.context = {
-      clientId: req.get("X-OpenHIM-ClientID") ?? "",
       correlationId: randomUUID(),
     } satisfies Context;
     next();
@@ -63,30 +56,16 @@ export function createApp(
 
   // Check the integration and trusted client before parsing patient data.
   app.use(
-    [
-      "/integrations/:id",
-      "/transform/:id/:direction",
-      ...integrations.map((item) => item.channelPath),
-    ],
+    [...integrations.map((item) => item.channelPath)],
     (req, res, next) => {
       const context: Context = res.locals.context;
-      const integration =
-        integrations.find((item) => item.channelPath === req.baseUrl) ??
-        integrations.find((item) => item.id === req.params.id);
-      if (!context.clientId)
-        return send(
-          res,
-          failure(403, "missing_client_identity", context, "authorization"),
-        );
+      const integration = integrations.find(
+        (item) => item.channelPath === req.baseUrl,
+      );
       if (!integration)
         return send(
           res,
           failure(404, "unknown_integration", context, "routing"),
-        );
-      if (!integration.allowedClients.includes(context.clientId))
-        return send(
-          res,
-          failure(403, "client_not_allowed", context, "authorization"),
         );
       res.locals.integration = integration;
       if (!req.is(["application/json", "application/fhir+json"]))
@@ -95,14 +74,6 @@ export function createApp(
           failure(415, "unsupported_content_type", context, "input"),
           integration,
         );
-      const idempotencyKey = req.get("Idempotency-Key");
-      if (idempotencyKey && !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey))
-        return send(
-          res,
-          failure(400, "invalid_idempotency_key", context, "input"),
-          integration,
-        );
-      context.idempotencyKey = idempotencyKey;
       next();
     },
   );
@@ -122,32 +93,6 @@ export function createApp(
         .catch(next);
     });
 
-  app.post("/integrations/:id", (req, res, next) => {
-    const integration: Integration = res.locals.integration;
-    execute(integration, req.body, res.locals.context, transport)
-      .then((result) => send(res, result, integration))
-      .catch(next);
-  });
-  app.post("/transform/:id/:direction", (req, res) => {
-    const context: Context = res.locals.context;
-    const integration: Integration = res.locals.integration;
-    const direction = req.params.direction;
-    if (direction !== "request" && direction !== "response")
-      return send(
-        res,
-        failure(400, "invalid_direction", context, "routing"),
-        integration,
-      );
-    const result = transform(integration, req.body, direction, context);
-    return send(
-      res,
-      result,
-      integration,
-      result.status === 200 && direction === "request"
-        ? "application/fhir+json"
-        : "application/json",
-    );
-  });
   app.use((_req, res) =>
     send(res, failure(404, "not_found", res.locals.context, "routing")),
   );

@@ -9,10 +9,10 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+ENV INTEGRATIONS_FILE=/config/integrations.json
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
-COPY integrations.json ./
 USER node
 EXPOSE 4005
 CMD ["node", "dist/index.js"]

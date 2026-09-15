@@ -33,11 +33,7 @@ export function mediatorDefinition(
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",
-    timeout:
-      (integration.destination?.timeoutMs ?? 0) +
-      (integration.lookup?.timeoutMs ?? 0) +
-      2 * (integration.validation?.timeoutMs ?? 0) +
-      5000,
+    timeout: (integration.validation?.timeoutMs ?? 0) + 5000,
     properties: [],
     txViewAcl: [],
     txViewFullAcl: [],

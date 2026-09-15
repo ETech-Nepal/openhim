@@ -4,20 +4,19 @@
     "channelPath": "/nagarik/registration",
     "mapping": "patient-registration-v1",
     "role": "national-app-clients",
-    "allowedClients": ["national-app"],
     "options": {
-      "nationalIdSystem": "http://donidcr.gov.np",
-      "healthIdSystem": "http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id"
-    }
+      "nationalIdSystem": "http://donidcr.gov.np"
+    },
+    "validation": { "urlEnv": "VALIDATOR_URL", "timeoutMs": 15000 }
   },
   {
     "id": "hospital-encounter-v1",
     "channelPath": "/emr/fhir",
     "mapping": "hospital-encounter-v1",
     "role": "hospital-encounter-clients",
-    "allowedClients": ["hospital-a"],
     "options": {
       "encounterIdentifierSystem": "https://example.org/hospital-a/encounter"
-    }
+    },
+    "validation": { "urlEnv": "VALIDATOR_URL", "timeoutMs": 15000 }
   }
 ]

@@ -4,35 +4,10 @@
     "channelPath": "/nagarik/registration",
     "mapping": "nagarik-app-registration-v1",
     "role": "national-app-clients",
-    "allowedClients": ["national-app"],
     "options": {},
-    "destination": {
-      "urlEnv": "NHID_URL",
+    "validation": {
+      "urlEnv": "VALIDATOR_URL",
       "timeoutMs": 15000
-    },
-    "lookup": {
-      "urlEnv": "FHIR_SERVER_URL",
-      "timeoutMs": 10000,
-      "matchIdentifierSystems": ["http://donidcr.gov.np"]
-    },
-    "forwardIdempotencyKey": false
-  },
-  {
-    "id": "emr-fhir-patient-v1",
-    "channelPath": "/emr/fhir",
-    "mapping": "emr-fhir-patient-v1",
-    "role": "emr-clients",
-    "allowedClients": ["hospital-a"],
-    "options": {},
-    "destination": {
-      "urlEnv": "NHID_URL",
-      "timeoutMs": 15000
-    },
-    "lookup": {
-      "urlEnv": "FHIR_SERVER_URL",
-      "timeoutMs": 10000,
-      "matchIdentifierSystems": ["http://donidcr.gov.np"]
-    },
-    "forwardIdempotencyKey": false
+    }
   }
 ]
