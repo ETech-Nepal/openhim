@@ -95,6 +95,39 @@ test("failed FHIR validation returns an error without forwarding the resource", 
   assert.equal(result.orchestrations.length, 1);
 });
 
+test("NP Core's missing health ID requirement is the only ignored validation error", async () => {
+  const healthIdOnly = await execute(integration(), input, context, async () =>
+    reply({
+      resourceType: "OperationOutcome",
+      issue: [
+        {
+          severity: "error",
+          code: "required",
+          diagnostics:
+            "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+          expression: ["Patient.identifier"],
+        },
+      ],
+    }),
+  );
+  assert.equal(healthIdOnly.status, 200);
+
+  const otherError = await execute(integration(), input, context, async () =>
+    reply({
+      resourceType: "OperationOutcome",
+      issue: [
+        {
+          severity: "error",
+          code: "required",
+          diagnostics: "Patient.name is required",
+          expression: ["Patient.name"],
+        },
+      ],
+    }),
+  );
+  assert.equal(otherError.status, 422);
+});
+
 test("configuration accepts validation-only integrations and rejects unsafe validators", () => {
   assert.doesNotThrow(() => parseIntegrations([definition], env));
   assert.throws(() =>

@@ -25,6 +25,8 @@ const outcomeSchema = z.object({
       z.object({
         severity: z.enum(["fatal", "error", "warning", "information"]),
         code: z.string().min(1),
+        diagnostics: z.string().optional(),
+        expression: z.array(z.string()).optional(),
       }),
     )
     .min(1),
@@ -61,6 +63,24 @@ function safeIssues(body: unknown) {
         code: issueCodes.has(issue.code) ? issue.code : "processing",
       }))
     : undefined;
+}
+
+function onlyMissingHealthId(body: unknown) {
+  const parsed = outcomeSchema.safeParse(body);
+  const errors = parsed.success
+    ? parsed.data.issue.filter((issue) =>
+        ["fatal", "error"].includes(issue.severity),
+      )
+    : [];
+  return (
+    errors.length > 0 &&
+    errors.every(
+      (issue) =>
+        issue.code === "required" &&
+        issue.expression?.includes("Patient.identifier") &&
+        issue.diagnostics?.includes("Patient.identifier:healthId"),
+    )
+  );
 }
 
 export function failure(
@@ -157,7 +177,10 @@ export async function execute(
         undefined,
         orchestrations,
       );
-    if (issues.some((issue) => ["fatal", "error"].includes(issue.severity)))
+    if (
+      issues.some((issue) => ["fatal", "error"].includes(issue.severity)) &&
+      !onlyMissingHealthId(response.body)
+    )
       return failure(
         422,
         "fhir_validation_failed",
