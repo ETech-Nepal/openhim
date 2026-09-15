@@ -27,6 +27,7 @@ const outcomeSchema = z.object({
         code: z.string().min(1),
         diagnostics: z.string().optional(),
         expression: z.array(z.string()).optional(),
+        details: z.object({ text: z.string().optional() }).optional(),
       }),
     )
     .min(1),
@@ -76,9 +77,12 @@ function onlyMissingHealthId(body: unknown) {
     errors.length > 0 &&
     errors.every(
       (issue) =>
-        issue.code === "required" &&
-        issue.expression?.includes("Patient.identifier") &&
-        issue.diagnostics?.includes("Patient.identifier:healthId"),
+        ["required", "structure"].includes(issue.code) &&
+        [issue.diagnostics, issue.details?.text].some((message) =>
+          message?.includes(
+            "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+          ),
+        ),
     )
   );
 }

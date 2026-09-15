@@ -102,10 +102,10 @@ test("NP Core's missing health ID requirement is the only ignored validation err
       issue: [
         {
           severity: "error",
-          code: "required",
-          diagnostics:
-            "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
-          expression: ["Patient.identifier"],
+          code: "structure",
+          details: {
+            text: "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+          },
         },
       ],
     }),
