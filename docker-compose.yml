@@ -115,7 +115,7 @@ services:
       KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8083}"
       KC_HOSTNAME_STRICT: "false"
       # DPoP-bound access tokens (RFC 9449). Clients created by keycloak/create-jwt-client.sh
-      # opt in per client; fhir-gateway-mediator verifies the proof.
+      # opt in per client; openhim-core verifies the proof.
       KC_FEATURES: dpop
       KC_PROXY_HEADERS: xforwarded
     # Bound to 8083 on localhost only — matches authentication_jwt_issuer below.
@@ -139,7 +139,9 @@ services:
 
   openhim-core:
     container_name: openhim-core
-    image: jembi/openhim-core:latest
+    # ETech-Nepal fork: stock core + DPoP proof verification (RFC 9449) + X-Role
+    # forwarding (routes.forwardRoleHeader). Replaces the old fhir-gateway-mediator.
+    image: ghcr.io/etech-nepal/openhim-core:feat-dpop-x-role
     restart: unless-stopped
     environment:
       mongo_url: "mongodb://mongo-db/openhim-development"
@@ -160,6 +162,12 @@ services:
       authentication_jwt_audience: "account"
       # Internal docker-network URL: the realm segment must match KEYCLOAK_ISSUER's realm.
       authentication_jwt_jwksUri: "${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/openhie/protocol/openid-connect/certs}"
+      # DPoP: tokens with cnf.jkt must carry a DPoP proof whose htu = <this>/<path>.
+      # Must be the URL clients actually call. Empty disables the check.
+      authentication_jwt_dpopPublicBaseUrl: "${PUBLIC_BASE_URL:-https://localhost:5000}"
+      # realm_access.roles -> X-Role for routes with forwardRoleHeader (hie-fhir-server
+      # style HAPI). Unused by stock HAPI channels in openhim-config/hapi-channels.json.
+      authentication_jwt_roleMappings: "hip=ehr,hiu=patient"
     ports:
       - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
       - "5000:5000"   # Secure transaction port (HTTPS)
@@ -223,7 +231,7 @@ services:
     depends_on:
       hapi-db:
         condition: service_healthy
-    # No host port. All FHIR traffic goes through OpenHIM -> fhir-gateway-mediator (see below).
+    # No host port. All FHIR traffic goes through OpenHIM (openhim-config/hapi-channels.json).
     # Publishing 8080 here would allow unauthenticated read/write on the FHIR store.
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
@@ -283,31 +291,6 @@ services:
       openhim-core:
         condition: service_started
       mediator:
-        condition: service_started
-
-  # ── FHIR Gateway mediator ──
-  # Owns the /fhir channels (openhim-config/hapi-channels.json is the same list it
-  # self-registers from src/channels.ts). OpenHIM enforces who may hit which URL/method
-  # via those per-role channels (client roles `ehr`, `patient`); this mediator verifies
-  # the Keycloak JWT against the realm JWKS, verifies the DPoP proof when the token is
-  # sender-constrained (cnf.jkt), and proxies to fhir:8080. Reached at fhir-gateway-mediator:4004.
-  fhir-gateway-mediator:
-    container_name: fhir-gateway-mediator
-    build:
-      context: ./services/fhir-gateway-mediator
-    restart: unless-stopped
-    networks:
-      - openhim
-    volumes:
-      - "./services/fhir-gateway-mediator:/app"
-      - "/app/node_modules"
-    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
-    env_file:
-      - ./services/fhir-gateway-mediator/.env
-    depends_on:
-      openhim-core:
-        condition: service_started
-      fhir:
         condition: service_started
 
   # ── Patient Admin Review mediator ──

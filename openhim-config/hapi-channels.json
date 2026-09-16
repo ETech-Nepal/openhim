@@ -16,9 +16,9 @@
     ],
     "routes": [
       {
-        "name": "gateway",
-        "host": "fhir-gateway-mediator",
-        "port": 4004,
+        "name": "hapi",
+        "host": "fhir",
+        "port": 8080,
         "primary": true,
         "type": "http",
         "secured": false
@@ -40,9 +40,9 @@
     ],
     "routes": [
       {
-        "name": "gateway",
-        "host": "fhir-gateway-mediator",
-        "port": 4004,
+        "name": "hapi",
+        "host": "fhir",
+        "port": 8080,
         "primary": true,
         "type": "http",
         "secured": false
@@ -66,9 +66,9 @@
     ],
     "routes": [
       {
-        "name": "gateway",
-        "host": "fhir-gateway-mediator",
-        "port": 4004,
+        "name": "hapi",
+        "host": "fhir",
+        "port": 8080,
         "primary": true,
         "type": "http",
         "secured": false
@@ -92,9 +92,9 @@
     ],
     "routes": [
       {
-        "name": "gateway",
-        "host": "fhir-gateway-mediator",
-        "port": 4004,
+        "name": "hapi",
+        "host": "fhir",
+        "port": 8080,
         "primary": true,
         "type": "http",
         "secured": false

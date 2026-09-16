@@ -21,8 +21,6 @@ jobs:
             context: services/fhir-mediator
           - image: fhir-intake-mediator
             context: services/fhir-intake-mediator
-          - image: fhir-gateway-mediator
-            context: services/fhir-gateway-mediator
           - image: fhir-transform-mediator
             context: services/fhir-transform-mediator
           - image: openhie-admin-mediator

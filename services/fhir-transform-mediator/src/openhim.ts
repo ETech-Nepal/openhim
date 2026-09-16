@@ -29,7 +29,7 @@ export function mediatorDefinition(
         type: "http",
       },
     ],
-    requestBody: false,
+    requestBody: true,
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",

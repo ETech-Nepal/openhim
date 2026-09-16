@@ -6,7 +6,6 @@ on:
       - "services/fhir-mediator/**"
       - "services/fhir-intake-mediator/**"
       - "services/fhir-transform-mediator/**"
-      - "services/fhir-gateway-mediator/**"
       - "docker-compose.yml"
       - ".github/workflows/**"
   push:
@@ -14,7 +13,6 @@ on:
       - "services/fhir-mediator/**"
       - "services/fhir-intake-mediator/**"
       - "services/fhir-transform-mediator/**"
-      - "services/fhir-gateway-mediator/**"
       - "docker-compose.yml"
       - ".github/workflows/**"
   workflow_call:
@@ -33,7 +31,6 @@ jobs:
             fhir-intake-mediator,
             fhir-mediator,
             fhir-transform-mediator,
-            fhir-gateway-mediator,
           ]
     defaults:
       run:

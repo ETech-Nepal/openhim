@@ -198,5 +198,6 @@ test("OpenHIM registration keeps authorization on the channel and uses one valid
     [integration()],
   ).defaultChannelConfig;
   assert.deepEqual(channels[0].allow, ["national-app-clients"]);
+  assert.equal(channels[0].requestBody, true);
   assert.equal(channels[0].timeout, 6000);
 });
