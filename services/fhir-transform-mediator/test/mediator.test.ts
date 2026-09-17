@@ -11,7 +11,10 @@ import { execute } from "../src/execute.js";
 import { mappings } from "../src/mappings/index.js";
 import { mediatorDefinition } from "../src/openhim.js";
 
-const env = { VALIDATOR_URL: "http://example.test/Patient/$validate" };
+const env = {
+  VALIDATOR_URL: "http://example.test/Patient/$validate",
+  NHID_GENERATOR_URL: "http://nhid-generator:9090/generate",
+};
 const definition = {
   id: "national-registration-v1",
   channelPath: "/nagarik/registration",
@@ -81,6 +84,35 @@ test("execution validates mapped FHIR and returns it without forwarding", async 
     [env.VALIDATOR_URL],
   );
   assert.equal(result.orchestrations.length, 1);
+});
+
+test("execution sends validated FHIR to the NHID generator and returns its response", async () => {
+  const generator = {
+    nhidGenerator: { urlEnv: "NHID_GENERATOR_URL", timeoutMs: 1000 },
+  };
+  const configured = parseIntegrations(
+    [{ ...definition, ...generator }],
+    env,
+  )[0];
+  const calls: any[] = [];
+  const generated = { healthId: "1234-5678-9012" };
+  const result = await execute(
+    configured,
+    input,
+    context,
+    async (request: any) => {
+      calls.push(request);
+      return calls.length === 1 ? reply(valid) : reply(generated, 201);
+    },
+  );
+
+  assert.equal(result.status, 201);
+  assert.deepEqual(result.body, generated);
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [env.VALIDATOR_URL, env.NHID_GENERATOR_URL],
+  );
+  assert.equal(calls[1].body.resourceType, "Patient");
 });
 
 test("failed FHIR validation returns an error without forwarding the resource", async () => {

@@ -5,13 +5,13 @@ resource, and returns it to OpenHIM. OpenHIM authenticates and authorizes
 callers before it routes traffic here.
 
 ```text
-Nagarik app → OpenHIM → Transform mediator → local NP Core validator
-                       ← validated FHIR resource ←
+Nagarik app → OpenHIM → Transform mediator → local NP Core validator → NHID generator
+                       ← NHID generator response ←
 ```
 
-It does not look up patients, generate NHIDs, write to NHID/HAPI/JeMPI, forward
-requests, or authenticate callers. A future downstream service belongs in an
-OpenHIM route after this mediator; it is not configured here.
+It does not look up patients, write to HAPI/JeMPI, or authenticate callers.
+For integrations configured with `nhidGenerator`, it sends the validated FHIR
+resource to that service and returns its status and body unchanged.
 
 ## Routes
 

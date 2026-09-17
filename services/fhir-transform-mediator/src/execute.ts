@@ -13,7 +13,7 @@ export type Orchestration = {
 };
 export type Result = {
   status: number;
-  body: Record<string, unknown>;
+  body: unknown;
   orchestrations: Orchestration[];
 };
 type Outcome = "not-called";
@@ -194,7 +194,47 @@ export async function execute(
         issues,
         orchestrations,
       );
-    return { status: 200, body: mapped.body, orchestrations };
+    if (!integration.nhidGenerator)
+      return { status: 200, body: mapped.body, orchestrations };
+
+    const generatorStage = "nhid-generation";
+    const generator = integration.nhidGenerator;
+    const generatorUrl = new URL(generator.url);
+    const generatorEntry: Orchestration = {
+      name: `${integration.id}: ${generatorStage}`,
+      request: {
+        method: "POST",
+        path: generatorUrl.pathname,
+        timestamp: new Date().toISOString(),
+      },
+      response: { status: 0, timestamp: new Date().toISOString() },
+    };
+    orchestrations.push(generatorEntry);
+    try {
+      const response = await transport({
+        url: generatorUrl.href,
+        body: mapped.body,
+        timeoutMs: generator.timeoutMs,
+        headers: generator.authorization
+          ? { Authorization: generator.authorization }
+          : {},
+      });
+      generatorEntry.response.status = response.status;
+      return { status: response.status, body: response.body, orchestrations };
+    } catch (error) {
+      const timeout = error instanceof TransportError && error.timeout;
+      return failure(
+        timeout ? 504 : 502,
+        timeout ? "upstream_timeout" : "upstream_unavailable",
+        context,
+        generatorStage,
+        "not-called",
+        undefined,
+        orchestrations,
+      );
+    } finally {
+      generatorEntry.response.timestamp = new Date().toISOString();
+    }
   } catch (error) {
     const timeout = error instanceof TransportError && error.timeout;
     return failure(

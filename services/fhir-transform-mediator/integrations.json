@@ -9,6 +9,10 @@
       "urlEnv": "VALIDATOR_URL",
       "timeoutMs": 15000,
       "requestProfile": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient"
+    },
+    "nhidGenerator": {
+      "urlEnv": "NHID_GENERATOR_URL",
+      "timeoutMs": 15000
     }
   }
 ]

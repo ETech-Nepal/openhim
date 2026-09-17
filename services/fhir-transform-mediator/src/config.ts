@@ -40,6 +40,7 @@ const integrationSchema = z
         requestProfile: z.string().url().optional(),
       })
       .optional(),
+    nhidGenerator: endpoint.optional(),
   })
   .strict();
 
@@ -108,6 +109,9 @@ export function parseIntegrations(
           ...resolve(value.validation),
           requestProfile: value.validation.requestProfile,
         }
+      : undefined,
+    nhidGenerator: value.nhidGenerator
+      ? resolve(value.nhidGenerator)
       : undefined,
   }));
 }
