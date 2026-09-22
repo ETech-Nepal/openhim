@@ -31,8 +31,8 @@ Notation:
 | Keycloak | `quay.io/keycloak/keycloak:26.7.2` | RS256 JWT issuer, realm `openhie` | `127.0.0.1:8083` |
 | `mediator` (FHIR MPI Orchestrator) | `./services/fhir-mediator`, Node 20 | Patient to JeMPI to HID to HAPI upsert; other resources pass-through | internal `:4000` |
 | `fhir-intake-mediator` | `./services/fhir-intake-mediator` | `POST /ingest`: CDRS row to Bundle to orchestrator; FHIR pass-through | internal `:4003` |
-| `admin-mediator` | `./admin-mediator` | duplicate review queue + merge in JeMPI **and** HAPI | internal `:4002` |
-| `patient-portal-mediator` | `./patient-portal-mediator` | read-only patient-scoped aggregate over HAPI | internal `:4001` |
+| `admin-mediator` | `./services/admin-mediator` | duplicate review queue + merge in JeMPI **and** HAPI | internal `:4002` |
+| `patient-portal-mediator` | `./services/patient-portal-mediator` | read-only patient-scoped aggregate over HAPI | internal `:4001` |
 | Caddy (`caddy` / `caddy-ip`) | `caddy:2-alpine` | reverse proxy + automatic TLS, **VPS only**, profiles `vps` / `vps-ip` | `80`, `443` |
 | JeMPI | **external** — `202.51.71.81`, `:50000` open / `:50001` Keycloak | master patient index: golden records, deterministic + probabilistic linking | none |
 
@@ -434,7 +434,7 @@ No split operation exists; a wrong merge is effectively irreversible.
 ## 12. Database ERD
 
 The only application-owned relational schema in this repo is
-`admin_review.review_tasks` (`admin-mediator/src/db/pool.js`). HAPI's ~150 tables
+`admin_review.review_tasks` (`services/admin-mediator/src/db/pool.ts`). HAPI's ~150 tables
 are managed by HAPI itself (Hibernate; Flyway disabled).
 
 ```mermaid

@@ -51,7 +51,7 @@ Start with the [documentation index](docs/00-documentation-index.md).
 
 - [FHIR MPI Orchestrator](services/fhir-mediator/README.md)
 - [FHIR Intake mediator](services/fhir-intake-mediator/README.md)
-- [Admin Review mediator](admin-mediator/README.md)
+- [Admin Review mediator](services/admin-mediator/README.md)
 - [Keycloak setup](keycloak/README.md)
 
 ## Security note

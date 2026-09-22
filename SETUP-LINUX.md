@@ -93,8 +93,8 @@ your input:
 | File | Variable | Set to |
 |---|---|---|
 | all four | `OPENHIM_PASSWORD` | the OpenHIM root password from step 3 — **blank in the examples**; mediators crash-loop until it is filled |
-| `services/fhir-mediator/.env`, `admin-mediator/.env` | `JEMPI_BASE_URL` | see step 0e |
-| `patient-portal-mediator/.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` |
+| `services/fhir-mediator/.env`, `services/admin-mediator/.env` | `JEMPI_BASE_URL` | see step 0e |
+| `services/patient-portal-mediator/.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` |
 | `services/fhir-mediator/.env` | `FACILITY_REGISTRY_JSON` | only as the step-7 fallback |
 
 Do **not** create a root `.env` for a local run — every variable has a
@@ -105,7 +105,7 @@ VPS-only file (`VPS-DEPLOYMENT.md`).
 ### 0e. Decide how the mediators reach JeMPI
 
 JeMPI is **not** in this compose stack. It runs on a separate host
-(`202.51.71.81`). Both `services/fhir-mediator/.env` and `admin-mediator/.env` need
+(`202.51.71.81`). Both `services/fhir-mediator/.env` and `services/admin-mediator/.env` need
 `JEMPI_BASE_URL`. Pick one now; you can change it later with
 `docker compose up -d --force-recreate mediator admin-mediator`.
 
@@ -113,7 +113,7 @@ JeMPI is **not** in this compose stack. It runs on a separate host
 
 ```bash
 sed -i 's#^JEMPI_BASE_URL=.*#JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI#' \
-  services/fhir-mediator/.env admin-mediator/.env
+  services/fhir-mediator/.env services/admin-mediator/.env
 curl http://202.51.71.81:50000/JeMPI/countRecords     # must return JSON
 ```
 
@@ -598,4 +598,4 @@ Rebuild order: step 1 → step 3 (reset + propagate root password) → step 4 �
 | `502` + `JeMPI register failed` | `JEMPI_BASE_URL` wrong / unreachable — check step 0e from host **and** `docker exec mediator wget -qO- $JEMPI_BASE_URL/countRecords` |
 | container can't reach `10.8.0.1`, host can | masquerade the docker subnet out `wg0` (0e Option B) |
 | Keycloak realm gone after a stop | `docker compose down` was used — use `stop`/`start` |
-| `502` only from `admin-mediator` | it needs its **own** `JEMPI_BASE_URL` in `admin-mediator/.env` |
+| `502` only from `admin-mediator` | it needs its **own** `JEMPI_BASE_URL` in `services/admin-mediator/.env` |

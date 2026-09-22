@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "../src/app.js";
 import { parseConfig, parseIntegrations } from "../src/config.js";
 import { execute } from "../src/execute.js";
+import { TransportError } from "../src/http.js";
 import { mappings } from "../src/mappings/index.js";
 import { mediatorDefinition } from "../src/openhim.js";
 
@@ -32,6 +33,41 @@ const input = {
   gender: "female",
   dob: "2000-02-29",
   nationalId: "00123",
+};
+const nagarikDefinition = {
+  id: "nagarik-app-registration-v1",
+  channelPath: "/nagarik/registration",
+  mapping: "nagarik-app-registration-v1",
+  role: "national-app-clients",
+  options: {},
+  validation: { urlEnv: "VALIDATOR_URL", timeoutMs: 1000 },
+  nhidGenerator: { urlEnv: "NHID_GENERATOR_URL", timeoutMs: 1000 },
+};
+const nagarikIntegration = () => parseIntegrations([nagarikDefinition], env)[0];
+const nagarikInput = {
+  requestId: "NAG-2026-09-14-0001842",
+  source: "nagarik-app",
+  citizen: {
+    nationalId: "1234-5978-9012-3",
+    citizenshipNumber: "12-34-56-78901",
+    healthInsuranceNumber: "HIB-000123456",
+    nameEn: { given: "Aarav", family: "Shrestha" },
+    nameNe: { given: "आरव", family: "श्रेष्ठ" },
+    gender: "M",
+    dobBS: "2047-02-01",
+    dobAD: "1990-05-15",
+    casteEthnicityCode: "1",
+    mobile: "+9779801234567",
+    email: "aarav.shrestha@example.com",
+    permanentAddress: {
+      provinceCode: "3",
+      districtCode: "306",
+      localLevelCode: "30608",
+      wardNo: 10,
+      tole: "Naxal",
+      postalCode: "44600",
+    },
+  },
 };
 const valid = {
   resourceType: "OperationOutcome",
@@ -113,6 +149,109 @@ test("execution sends validated FHIR to the NHID generator and returns its respo
     [env.VALIDATOR_URL, env.NHID_GENERATOR_URL],
   );
   assert.equal(calls[1].body.resourceType, "Patient");
+});
+
+test("Nagarik receives its JSON request with the generated FHIR health ID", async () => {
+  for (const status of [200, 201]) {
+    let calls = 0;
+    const result = await execute(
+      nagarikIntegration(),
+      nagarikInput,
+      context,
+      async () =>
+        reply(
+          ++calls === 1
+            ? valid
+            : {
+                resourceType: "Patient",
+                identifier: [
+                  {
+                    system:
+                      "http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id",
+                    type: { coding: [{ code: "health-id" }] },
+                    value: "WE1353934",
+                  },
+                ],
+              },
+          status,
+        ),
+    );
+
+    assert.equal(result.status, status);
+    assert.deepEqual(result.body, {
+      ...nagarikInput,
+      citizen: { ...nagarikInput.citizen, healthId: "WE1353934" },
+    });
+  }
+});
+
+test("Nagarik receives a validation error message", async () => {
+  const result = await execute(
+    nagarikIntegration(),
+    nagarikInput,
+    context,
+    async () =>
+      reply({
+        resourceType: "OperationOutcome",
+        issue: [{ severity: "error", code: "required" }],
+      }),
+  );
+
+  assert.equal(result.status, 422);
+  assert.deepEqual(result.body, {
+    requestId: nagarikInput.requestId,
+    source: "nagarik-app",
+    status: "failed",
+    error: {
+      code: "fhir_validation_failed",
+      message: "The submitted citizen data failed validation.",
+      issues: [{ severity: "error", code: "required" }],
+    },
+  });
+});
+
+test("Nagarik identifies a validation service outage", async () => {
+  const result = await execute(
+    nagarikIntegration(),
+    nagarikInput,
+    context,
+    async () => {
+      throw new TransportError(false);
+    },
+  );
+
+  assert.equal(result.status, 502);
+  assert.deepEqual(result.body, {
+    requestId: nagarikInput.requestId,
+    source: "nagarik-app",
+    status: "failed",
+    error: {
+      code: "upstream_unavailable",
+      message: "The validation service is unavailable.",
+    },
+  });
+});
+
+test("Nagarik receives an NHID service error message", async () => {
+  let calls = 0;
+  const result = await execute(
+    nagarikIntegration(),
+    nagarikInput,
+    context,
+    async () =>
+      ++calls === 1 ? reply(valid) : reply({ error: "unavailable" }, 503),
+  );
+
+  assert.equal(result.status, 503);
+  assert.deepEqual(result.body, {
+    requestId: nagarikInput.requestId,
+    source: "nagarik-app",
+    status: "failed",
+    error: {
+      code: "nhid_service_failed",
+      message: "The NHID service could not complete the registration.",
+    },
+  });
 });
 
 test("failed FHIR validation returns an error without forwarding the resource", async () => {

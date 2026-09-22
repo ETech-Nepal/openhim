@@ -211,13 +211,13 @@ Source: `Caddyfile`.
 ## 5. WireGuard tunnel to JeMPI
 
 The mediators reach JeMPI at `JEMPI_BASE_URL` in `services/fhir-mediator/.env` **and**
-`admin-mediator/.env`. Two ways:
+`services/admin-mediator/.env`. Two ways:
 
 ### Option A — public port (simplest; test data only)
 
 ```bash
 sed -i 's#^JEMPI_BASE_URL=.*#JEMPI_BASE_URL=http://<jempi-vps-ip>:50000/JeMPI#' \
-  services/fhir-mediator/.env admin-mediator/.env
+  services/fhir-mediator/.env services/admin-mediator/.env
 curl http://<jempi-vps-ip>:50000/JeMPI/countRecords     # must return JSON
 ```
 
@@ -281,7 +281,7 @@ curl http://10.8.0.1:50000/JeMPI/countRecords          # from the host — must 
 ```
 
 Keep `JEMPI_BASE_URL=http://10.8.0.1:50000/JeMPI` (the default) in both
-`services/fhir-mediator/.env` and `admin-mediator/.env`.
+`services/fhir-mediator/.env` and `services/admin-mediator/.env`.
 
 **Container can't reach `10.8.0.1` even though the host can** — masquerade the
 Docker subnet out the tunnel (the containers reach `10.8.0.1` through Docker NAT,

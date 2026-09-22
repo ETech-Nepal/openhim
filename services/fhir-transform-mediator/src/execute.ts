@@ -109,6 +109,33 @@ export function failure(
   };
 }
 
+function mappingFailure(
+  integration: Integration,
+  input: unknown,
+  status: number,
+  error: string,
+  context: Context,
+  stage: string,
+  issues?: unknown,
+  orchestrations: Orchestration[] = [],
+): Result {
+  const mapper = mappings[integration.mapping];
+  return {
+    ...failure(
+      status,
+      error,
+      context,
+      stage,
+      "not-called",
+      issues,
+      orchestrations,
+    ),
+    ...(mapper.toError && {
+      body: mapper.toError(input, error, issues, stage),
+    }),
+  };
+}
+
 export function transform(
   integration: Integration,
   input: unknown,
@@ -140,8 +167,22 @@ export async function execute(
   context: Context,
   transport: Transport = postJson,
 ): Promise<Result> {
+  const mapper = mappings[integration.mapping];
   const mapped = transform(integration, input, context);
-  if (mapped.status !== 200) return mapped;
+  if (mapped.status !== 200) {
+    const body = mapped.body as { error?: unknown; issues?: unknown };
+    return typeof body.error === "string"
+      ? mappingFailure(
+          integration,
+          input,
+          mapped.status,
+          body.error,
+          context,
+          "request-mapping",
+          body.issues,
+        )
+      : mapped;
+  }
   const orchestrations: Orchestration[] = [];
   if (!integration.validation)
     return { status: 200, body: mapped.body, orchestrations };
@@ -172,12 +213,13 @@ export async function execute(
     entry.response.status = response.status;
     const issues = safeIssues(response.body);
     if (response.status < 200 || response.status >= 300 || !issues)
-      return failure(
+      return mappingFailure(
+        integration,
+        input,
         502,
         "validator_failed",
         context,
         stage,
-        "not-called",
         undefined,
         orchestrations,
       );
@@ -185,12 +227,13 @@ export async function execute(
       issues.some((issue) => ["fatal", "error"].includes(issue.severity)) &&
       !onlyMissingHealthId(response.body)
     )
-      return failure(
+      return mappingFailure(
+        integration,
+        input,
         422,
         "fhir_validation_failed",
         context,
         stage,
-        "not-called",
         issues,
         orchestrations,
       );
@@ -220,15 +263,48 @@ export async function execute(
           : {},
       });
       generatorEntry.response.status = response.status;
-      return { status: response.status, body: response.body, orchestrations };
+      if (response.status < 200 || response.status >= 300)
+        return mappingFailure(
+          integration,
+          input,
+          response.status,
+          "nhid_service_failed",
+          context,
+          generatorStage,
+          undefined,
+          orchestrations,
+        );
+      try {
+        return {
+          status: response.status,
+          body:
+            (response.status === 200 || response.status === 201) &&
+            mapper.fromFhir
+              ? mapper.fromFhir(response.body, input, integration.options)
+              : response.body,
+          orchestrations,
+        };
+      } catch {
+        return mappingFailure(
+          integration,
+          input,
+          502,
+          "response_mapping_failed",
+          context,
+          "response-mapping",
+          undefined,
+          orchestrations,
+        );
+      }
     } catch (error) {
       const timeout = error instanceof TransportError && error.timeout;
-      return failure(
+      return mappingFailure(
+        integration,
+        input,
         timeout ? 504 : 502,
         timeout ? "upstream_timeout" : "upstream_unavailable",
         context,
         generatorStage,
-        "not-called",
         undefined,
         orchestrations,
       );
@@ -237,12 +313,13 @@ export async function execute(
     }
   } catch (error) {
     const timeout = error instanceof TransportError && error.timeout;
-    return failure(
+    return mappingFailure(
+      integration,
+      input,
       timeout ? 504 : 502,
       timeout ? "upstream_timeout" : "upstream_unavailable",
       context,
       "request-validation",
-      "not-called",
       undefined,
       orchestrations,
     );

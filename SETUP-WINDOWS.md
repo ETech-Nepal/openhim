@@ -114,8 +114,8 @@ the first `docker compose up` (§2).
 
 ```powershell
 Copy-Item services\fhir-mediator\.env.example                services\fhir-mediator\.env
-Copy-Item admin-mediator\.env.example          admin-mediator\.env
-Copy-Item patient-portal-mediator\.env.example patient-portal-mediator\.env
+Copy-Item services\admin-mediator\.env.example          services\admin-mediator\.env
+Copy-Item services\patient-portal-mediator\.env.example services\patient-portal-mediator\.env
 Copy-Item services\fhir-intake-mediator\.env.example    services\fhir-intake-mediator\.env
 ```
 
@@ -256,7 +256,7 @@ curl.exe http://202.51.71.81:50000/JeMPI/countRecords
 
 ```powershell
 $JEMPI = 'http://202.51.71.81:50000/JeMPI'
-foreach ($f in '.\services\fhir-mediator\.env', '.\admin-mediator\.env') {
+foreach ($f in '.\services\fhir-mediator\.env', '.\services\admin-mediator\.env') {
   $c = Get-Content -Raw -LiteralPath $f
   $c = if ($c -match '(?m)^JEMPI_BASE_URL=') { $c -replace '(?m)^JEMPI_BASE_URL=.*$', "JEMPI_BASE_URL=$JEMPI" }
        else { $c.TrimEnd() + "`nJEMPI_BASE_URL=$JEMPI" }
@@ -296,7 +296,7 @@ reaches a public IP through Docker's NAT with no extra rules — the Linux
 **What can go wrong.**
 
 - Setting only one of the two files. `services\fhir-mediator\.env` **and**
-  `admin-mediator\.env` both need `JEMPI_BASE_URL`; missing one is the usual
+  `services\admin-mediator\.env` both need `JEMPI_BASE_URL`; missing one is the usual
   cause of the `502` in §8.
 - Using `restart` instead of `--force-recreate` — the container keeps the old
   value, which is why the `docker exec ... echo` checks are there.
@@ -867,9 +867,9 @@ Anything not listed here is Docker-internal and should stay as shipped —
 |---|---|---|---|
 | all four | `OPENHIM_PASSWORD` | the OpenHIM root password from §3b — **blank in the examples**, mediators crash-loop until it is filled | §3c |
 | `services\fhir-mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` | §4 |
-| `admin-mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` — missing here is the usual cause of the §8 `502` | §4 |
+| `services\admin-mediator\.env` | `JEMPI_BASE_URL` | `http://202.51.71.81:50000/JeMPI` — missing here is the usual cause of the §8 `502` | §4 |
 | `services\fhir-mediator\.env` | `FACILITY_REGISTRY_JSON` | `{"<keycloak-uuid>":"<nhfr-id>"}`, only when the `sub` override fails | §7 |
-| `patient-portal-mediator\.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` | — |
+| `services\patient-portal-mediator\.env` | `PORTAL_PATIENT_SHARED_SECRET` | only if you run the patient-portal BFF — must equal its `SESSION_JWT_SECRET` | — |
 
 `mediator` and `fhir-intake-mediator` both bind to `np-fhir-clients` — the role
 `onboard-hospital.ps1` grants (§7). Changing one without the other is what

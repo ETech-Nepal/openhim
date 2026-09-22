@@ -74,8 +74,8 @@ Running: `hapi-db`, `mongo-db`, `openhim-core`, `openhim-console`, `fhir`,
 
 ### 2c. Propagate to mediators
 
-Edit `OPENHIM_PASSWORD` in `mediator\.env`, `admin-mediator\.env`,
-`patient-portal-mediator\.env`, `fhir-intake-mediator\.env` (Notepad or
+Edit `OPENHIM_PASSWORD` in `mediator\.env`, `services\admin-mediator\.env`,
+`services\patient-portal-mediator\.env`, `fhir-intake-mediator\.env` (Notepad or
 `notepad mediator\.env`), then:
 
 ```powershell

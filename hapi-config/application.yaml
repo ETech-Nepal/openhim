@@ -51,6 +51,18 @@ hapi:
     subscription:
       resthook_enabled: true
 
+    # Full-text / $lastn / large ValueSet expansion via Elasticsearch (docker-compose
+    # `elasticsearch` service). Resource bodies stay in Postgres.
+    advanced_lucene_indexing: true
+    elasticsearch:
+      enabled: true
+      protocol: http
+      url: elasticsearch:9200
+      username: elastic
+      password: ${ELASTIC_PASSWORD}
+      required_index_status: YELLOW
+      index_settings: '{"index.number_of_replicas": 0}'
+
     tester:
       - id: home
         name: Local Tester

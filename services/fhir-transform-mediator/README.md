@@ -11,7 +11,9 @@ Nagarik app → OpenHIM → Transform mediator → local NP Core validator → N
 
 It does not look up patients, write to HAPI/JeMPI, or authenticate callers.
 For integrations configured with `nhidGenerator`, it sends the validated FHIR
-resource to that service and returns its status and body unchanged.
+resource to that service. Nagarik receives its original JSON with the generated
+`citizen.healthId`; validation and NHID failures return a Nagarik JSON error
+message in `response.body`.
 
 ## Routes
 

@@ -200,7 +200,7 @@ flowchart TD
 > permanently empty. The threshold band above only applies to JeMPI's async
 > Kafka path. Near-miss duplicates are found and resolved by the
 > **`admin-mediator`** instead (§9).
-> Source: `admin-mediator/README.md`, `jempi-config/README.md`.
+> Source: `services/admin-mediator/README.md`, `jempi-config/README.md`.
 
 `candidateThreshold` (the `mediator` env `JEMPI_CANDIDATE_THRESHOLD`, default
 `0.9`, sent on `crRegister`) is the confidence needed to link _synchronously_ to
@@ -231,14 +231,14 @@ ID _is_ the HAPI resource id [key]."
 The **patient portal** resolves by golden UID instead:
 `GET /Patient?identifier=jempi-golden-uid|<gid>` returns _every_ linked Patient
 record, then the portal fans out and merges their encounters/reports/documents
-(`patient-portal-mediator/src/handlers/patientPortal.js`).
+(`services/patient-portal-mediator/src/handlers/patientPortal.ts`).
 
 ---
 
 ## 9. Effect of an admin merge on the HID
 
 When the `admin-mediator` merges a confirmed duplicate pair
-(`admin-mediator/src/services/mergeService.js`):
+(`services/admin-mediator/src/services/mergeService.ts`):
 
 ```mermaid
 flowchart TD

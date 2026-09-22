@@ -38,7 +38,7 @@ registration, a HAPI write are all captured with request/response bodies), plus
 
 - ✅ **Every downstream call is logged with payloads** — the orchestration trail
   on a transaction is the audit record for identity-changing operations
-  (`admin-mediator/src/openhim.js` comment: merges are routed through OpenHIM
+  (`services/admin-mediator/src/openhim.js` comment: merges are routed through OpenHIM
   *specifically* so they land in the log).
 - ✅ **Central auth + RBAC** — one JWT verification point, one role model
   (`np-fhir-clients`, `np-admin-clients`, `patient-portal-clients`,
@@ -247,7 +247,7 @@ can be minted and the HAPI `PUT` done in one round trip.
 
 | Alternative | Trade-off |
 |---|---|
-| **Async probabilistic path (`/upload` CSV → Kafka → linker)** | ✅ real F-S auto-linking + threshold band + native review queue. ⚠️ **destroys the synchronous `goldenUID`** the write path needs to mint the HID and `PUT` in one request (`admin-mediator/README.md` explicitly rejects this). Would require a two-phase write (register now, reconcile later). |
+| **Async probabilistic path (`/upload` CSV → Kafka → linker)** | ✅ real F-S auto-linking + threshold band + native review queue. ⚠️ **destroys the synchronous `goldenUID`** the write path needs to mint the HID and `PUT` in one request (`services/admin-mediator/README.md` explicitly rejects this). Would require a two-phase write (register now, reconcile later). |
 | **Deterministic + inline probabilistic call before persist** | ◻️ possible if JeMPI exposed a synchronous scored match; `/calculateScores` is **404** on this deployment, so not available. |
 
 **Verdict:** synchronous deterministic is the only option that keeps the "one

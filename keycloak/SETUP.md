@@ -62,8 +62,8 @@ Running: `hapi-db`, `mongo-db`, `openhim-core`, `openhim-console`, `fhir`,
 
 ### 2c. Propagate to mediators
 
-Set `OPENHIM_PASSWORD` in `services/fhir-mediator/.env`, `admin-mediator/.env`,
-`patient-portal-mediator/.env`, `services/fhir-intake-mediator/.env`, then:
+Set `OPENHIM_PASSWORD` in `services/fhir-mediator/.env`, `services/admin-mediator/.env`,
+`services/patient-portal-mediator/.env`, `services/fhir-intake-mediator/.env`, then:
 
 ```bash
 docker compose up -d --force-recreate mediator admin-mediator patient-portal-mediator fhir-intake-mediator

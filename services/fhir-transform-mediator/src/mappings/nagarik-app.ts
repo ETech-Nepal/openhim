@@ -3,8 +3,20 @@ import { z } from "zod";
 const core = "http://fhir.digitalhealth.gov.np/core";
 const identifierTypeSystem = `${core}/CodeSystem/np-core-identifier-type`;
 const locationSystem = `${core}/CodeSystem/nepal-administrative-location`;
+const healthIdSystem = `${core}/NamingSystem/nepal-health-id`;
 
 export const nagarikAppOptions = z.object({}).strict();
+
+const errorMessages: Record<string, string> = {
+  request_mapping_failed: "The submitted registration data is invalid.",
+  fhir_validation_failed: "The submitted citizen data failed validation.",
+  validator_failed:
+    "The validation service could not validate the citizen data.",
+  nhid_service_failed: "The NHID service could not complete the registration.",
+  upstream_timeout: "The NHID service did not respond in time.",
+  upstream_unavailable: "The NHID service is unavailable.",
+  response_mapping_failed: "The NHID service returned an invalid response.",
+};
 
 const name = z
   .object({
@@ -187,5 +199,75 @@ export function toFhir(
         },
       ],
     }),
+  };
+}
+
+const responsePatient = z
+  .object({
+    resourceType: z.literal("Patient"),
+    identifier: z
+      .array(
+        z
+          .object({
+            system: z.string().optional(),
+            value: z.string().optional(),
+            type: z
+              .object({
+                coding: z.array(z.object({ code: z.string().optional() })),
+              })
+              .optional(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+  })
+  .passthrough();
+
+export function fromFhir(
+  response: unknown,
+  input: unknown,
+  _options: Record<string, string>,
+): Record<string, unknown> {
+  const source = inputSchema.parse(input);
+  const patient = responsePatient.parse(response);
+  const healthId = patient.identifier.find(
+    (identifier) =>
+      identifier.system === healthIdSystem ||
+      identifier.type?.coding.some((coding) => coding.code === "health-id"),
+  )?.value;
+  return {
+    ...source,
+    citizen: { ...source.citizen, healthId: healthId ?? "" },
+  };
+}
+
+export function toError(
+  input: unknown,
+  error: string,
+  issues?: unknown,
+  stage?: string,
+): Record<string, unknown> {
+  const request = z
+    .object({
+      requestId: z.string().trim().min(1).max(100),
+      source: z.literal("nagarik-app"),
+    })
+    .passthrough()
+    .safeParse(input);
+  return {
+    ...(request.success && { requestId: request.data.requestId }),
+    source: "nagarik-app",
+    status: "failed",
+    error: {
+      code: error,
+      message:
+        stage === "request-validation" && error === "upstream_timeout"
+          ? "The validation service did not respond in time."
+          : stage === "request-validation" && error === "upstream_unavailable"
+            ? "The validation service is unavailable."
+            : (errorMessages[error] ??
+              "The registration could not be completed."),
+      ...(issues !== undefined ? { issues } : {}),
+    },
   };
 }
