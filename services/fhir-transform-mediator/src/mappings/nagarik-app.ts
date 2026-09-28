@@ -4,8 +4,23 @@ const core = "http://fhir.digitalhealth.gov.np/core";
 const identifierTypeSystem = `${core}/CodeSystem/np-core-identifier-type`;
 const locationSystem = `${core}/CodeSystem/nepal-administrative-location`;
 const healthIdSystem = `${core}/NamingSystem/nepal-health-id`;
+const bsDateExtension = `${core}/StructureDefinition/np-core-bikram-sambat-date`;
+const casteExtension = `${core}/StructureDefinition/caste-ethnicity`;
+const addressExtensions = {
+  province: `${core}/StructureDefinition/ext-nepal-province`,
+  district: `${core}/StructureDefinition/ext-nepal-district`,
+  localLevel: `${core}/StructureDefinition/ext-nepal-local-level`,
+};
+const identifierSystems = {
+  nationalId: "http://donidcr.gov.np",
+  citizenshipNumber: "http://moha.gov.np",
+  healthInsuranceNumber: "http://hib.gov.np",
+  healthId: healthIdSystem,
+};
 
 export const nagarikAppOptions = z.object({}).strict();
+
+const genderCodes = { M: "male", F: "female", O: "other", U: "unknown" };
 
 const errorMessages: Record<string, string> = {
   request_mapping_failed: "The submitted registration data is invalid.",
@@ -13,9 +28,19 @@ const errorMessages: Record<string, string> = {
   validator_failed:
     "The validation service could not validate the citizen data.",
   nhid_service_failed: "The NHID service could not complete the registration.",
+  nhid_missing_fields:
+    "The registration is missing fields the NHID service requires.",
+  nhid_missing_gender_or_phone:
+    "Gender and mobile number are required to generate a new Health ID.",
+  nhid_rejected_resource:
+    "The NHID service rejected the generated patient resource.",
+  nhid_identity_mismatch:
+    "A record with this national ID exists, but its details do not match this registration.",
+  nhid_existing_record:
+    "A record with this national ID exists without a Health ID.",
+  response_mapping_failed: "The NHID service returned an invalid response.",
   upstream_timeout: "The NHID service did not respond in time.",
   upstream_unavailable: "The NHID service is unavailable.",
-  response_mapping_failed: "The NHID service returned an invalid response.",
 };
 
 const name = z
@@ -136,9 +161,7 @@ export function toFhir(
           ]
         : []),
     ],
-    gender: { M: "male", F: "female", O: "other", U: "unknown" }[
-      citizen.gender
-    ],
+    gender: genderCodes[citizen.gender],
     birthDate: citizen.dobAD,
     ...(citizen.dobBS && {
       _birthDate: {
@@ -202,20 +225,53 @@ export function toFhir(
   };
 }
 
+const coding = z.object({ code: z.string().optional() }).passthrough();
+const extension = z
+  .object({
+    url: z.string(),
+    valueString: z.string().optional(),
+    valueCoding: coding.optional(),
+  })
+  .passthrough();
 const responsePatient = z
   .object({
     resourceType: z.literal("Patient"),
     identifier: z
       .array(
         z
+          .object({ system: z.string().optional(), value: z.string() })
+          .passthrough(),
+      )
+      .default([]),
+    name: z
+      .array(
+        z
           .object({
-            system: z.string().optional(),
-            value: z.string().optional(),
-            type: z
-              .object({
-                coding: z.array(z.object({ code: z.string().optional() })),
-              })
-              .optional(),
+            family: z.string().optional(),
+            given: z.array(z.string()).default([]),
+          })
+          .passthrough(),
+      )
+      .default([]),
+    gender: z.string().optional(),
+    birthDate: z.string().optional(),
+    _birthDate: z.object({ extension: z.array(extension) }).optional(),
+    extension: z.array(extension).default([]),
+    telecom: z
+      .array(
+        z
+          .object({ system: z.string().optional(), value: z.string() })
+          .passthrough(),
+      )
+      .default([]),
+    address: z
+      .array(
+        z
+          .object({
+            line: z.array(z.string()).default([]),
+            postalCode: z.string().optional(),
+            country: z.string().optional(),
+            extension: z.array(extension).default([]),
           })
           .passthrough(),
       )
@@ -223,21 +279,70 @@ const responsePatient = z
   })
   .passthrough();
 
+const optional = <T>(value: T | undefined, key: string) =>
+  value === undefined ? {} : { [key]: value };
+
+// The response reads the NP Core Patient the NHID service stored: FHIR element names and
+// IG codes, flattened for the app. NP Core carries no ward element, so the ward and tole
+// round-trip through address.line, the way toFhir writes them.
 export function fromFhir(
   response: unknown,
   input: unknown,
   _options: Record<string, string>,
 ): Record<string, unknown> {
-  const source = inputSchema.parse(input);
+  const { requestId } = z
+    .object({ requestId: z.string() })
+    .passthrough()
+    .parse(input);
   const patient = responsePatient.parse(response);
-  const healthId = patient.identifier.find(
-    (identifier) =>
-      identifier.system === healthIdSystem ||
-      identifier.type?.coding.some((coding) => coding.code === "health-id"),
-  )?.value;
+  const identifier = (system: string) =>
+    patient.identifier.find((entry) => entry.system === system)?.value;
+  const contact = (system: string) =>
+    patient.telecom.find((entry) => entry.system === system)?.value;
+  const coded = (extensions: z.infer<typeof extension>[], url: string) =>
+    extensions.find((entry) => entry.url === url)?.valueCoding?.code;
+  const address = patient.address[0];
+  const ward = address?.line[0]?.match(/^Ward (\d{1,2})$/)?.[1];
   return {
-    ...source,
-    citizen: { ...source.citizen, healthId: healthId ?? "" },
+    requestId,
+    source: "nagarik-app",
+    patient: {
+      ...Object.fromEntries(
+        Object.entries(identifierSystems)
+          .map(([key, system]) => [key, identifier(system)])
+          .filter(([, value]) => value !== undefined),
+      ),
+      name: patient.name.map((entry) => ({
+        ...optional(entry.given.length ? entry.given : undefined, "given"),
+        ...optional(entry.family, "family"),
+      })),
+      ...optional(patient.gender, "gender"),
+      ...optional(patient.birthDate, "birthDate"),
+      ...optional(
+        patient._birthDate?.extension.find(
+          (entry) => entry.url === bsDateExtension,
+        )?.valueString,
+        "birthDateBS",
+      ),
+      ...optional(coded(patient.extension, casteExtension), "casteEthnicity"),
+      telecom: {
+        ...optional(contact("phone"), "phone"),
+        ...optional(contact("email"), "email"),
+      },
+      ...(address && {
+        address: {
+          ...Object.fromEntries(
+            Object.entries(addressExtensions)
+              .map(([key, url]) => [key, coded(address.extension, url)])
+              .filter(([, value]) => value !== undefined),
+          ),
+          ...optional(ward ? Number(ward) : undefined, "wardNo"),
+          ...optional(address.line[1], "tole"),
+          ...optional(address.postalCode, "postalCode"),
+          ...optional(address.country, "country"),
+        },
+      }),
+    },
   };
 }
 

@@ -6,6 +6,8 @@ on:
       - "services/fhir-mediator/**"
       - "services/fhir-intake-mediator/**"
       - "services/fhir-transform-mediator/**"
+      - "services/admin-mediator/**"
+      - "services/patient-portal-mediator/**"
       - "docker-compose.yml"
       - ".github/workflows/**"
   push:
@@ -26,12 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service:
-          [
-            fhir-intake-mediator,
-            fhir-mediator,
-            fhir-transform-mediator,
-          ]
+        service: [fhir-intake-mediator, fhir-mediator, fhir-transform-mediator]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}

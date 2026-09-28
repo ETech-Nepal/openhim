@@ -87,6 +87,53 @@ function onlyMissingHealthId(body: unknown) {
   );
 }
 
+const nhidErrorSchema = z.object({
+  status: z.literal(false),
+  message: z.string().min(1),
+});
+const nhidRequiredFields = new Set([
+  "National ID",
+  "given name",
+  "family name",
+  "date of birth",
+]);
+const missingPrefix = "Missing field(s): ";
+
+// The NHID service reports every failure as {status:false,message}. A message can echo the
+// submitted resource or an OperationOutcome, so only the fixed vocabulary below is classified
+// and no upstream text is forwarded.
+function nhidError(status: number, body: unknown) {
+  const parsed = nhidErrorSchema.safeParse(body);
+  const message = parsed.success ? parsed.data.message : "";
+  if (message.startsWith(missingPrefix)) {
+    const fields = message
+      .slice(missingPrefix.length)
+      .split(", ")
+      .filter((field) => nhidRequiredFields.has(field));
+    if (fields.length)
+      return { status: 400, error: "nhid_missing_fields", issues: fields };
+  }
+  if (
+    message ===
+    "Gender and phone number are required to generate a new HealthID"
+  )
+    return { status: 400, error: "nhid_missing_gender_or_phone" };
+  // The mediator built the resource the service rejected, so this is not a caller error.
+  if (message.startsWith("Not a valid FHIR Patient request"))
+    return { status: 502, error: "nhid_rejected_resource" };
+  if (
+    message ===
+    "NID already exists but the provided data does not match the existing record"
+  )
+    return { status: 409, error: "nhid_identity_mismatch" };
+  if (message === "NID already exists")
+    return { status: 409, error: "nhid_existing_record" };
+  return {
+    status: status === 400 || status === 409 ? status : 502,
+    error: "nhid_service_failed",
+  };
+}
+
 export function failure(
   status: number,
   error: string,
@@ -263,25 +310,25 @@ export async function execute(
           : {},
       });
       generatorEntry.response.status = response.status;
-      if (response.status < 200 || response.status >= 300)
+      if (response.status < 200 || response.status >= 300) {
+        const classified = nhidError(response.status, response.body);
         return mappingFailure(
           integration,
           input,
-          response.status,
-          "nhid_service_failed",
+          classified.status,
+          classified.error,
           context,
           generatorStage,
-          undefined,
+          classified.issues,
           orchestrations,
         );
+      }
       try {
         return {
           status: response.status,
-          body:
-            (response.status === 200 || response.status === 201) &&
-            mapper.fromFhir
-              ? mapper.fromFhir(response.body, input, integration.options)
-              : response.body,
+          body: mapper.fromFhir
+            ? mapper.fromFhir(response.body, input, integration.options)
+            : response.body,
           orchestrations,
         };
       } catch {

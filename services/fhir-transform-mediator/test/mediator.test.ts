@@ -151,38 +151,83 @@ test("execution sends validated FHIR to the NHID generator and returns its respo
   assert.equal(calls[1].body.resourceType, "Patient");
 });
 
-test("Nagarik receives its JSON request with the generated FHIR health ID", async () => {
+test("Nagarik receives the stored Patient as flat JSON with FHIR names", async () => {
   for (const status of [200, 201]) {
     let calls = 0;
+    let stored: unknown;
     const result = await execute(
       nagarikIntegration(),
       nagarikInput,
       context,
-      async () =>
-        reply(
-          ++calls === 1
-            ? valid
-            : {
-                resourceType: "Patient",
-                identifier: [
-                  {
-                    system:
-                      "http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id",
-                    type: { coding: [{ code: "health-id" }] },
-                    value: "WE1353934",
-                  },
-                ],
-              },
-          status,
-        ),
+      async (request) => {
+        if (++calls === 1) return reply(valid);
+        // The service returns the resource it stored, with the health ID added.
+        const patient = request.body as { identifier: unknown[] };
+        stored = {
+          ...patient,
+          identifier: [
+            ...patient.identifier,
+            {
+              system:
+                "http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id",
+              value: "WE1353934",
+            },
+          ],
+        };
+        return reply(stored, status);
+      },
     );
 
     assert.equal(result.status, status);
     assert.deepEqual(result.body, {
-      ...nagarikInput,
-      citizen: { ...nagarikInput.citizen, healthId: "WE1353934" },
+      requestId: nagarikInput.requestId,
+      source: "nagarik-app",
+      patient: {
+        nationalId: nagarikInput.citizen.nationalId,
+        citizenshipNumber: nagarikInput.citizen.citizenshipNumber,
+        healthInsuranceNumber: nagarikInput.citizen.healthInsuranceNumber,
+        healthId: "WE1353934",
+        name: [
+          { given: ["Aarav"], family: "Shrestha" },
+          { given: ["आरव"], family: "श्रेष्ठ" },
+        ],
+        gender: "male",
+        birthDate: "1990-05-15",
+        birthDateBS: "2047-02-01",
+        casteEthnicity: "1",
+        telecom: {
+          phone: nagarikInput.citizen.mobile,
+          email: nagarikInput.citizen.email,
+        },
+        address: {
+          province: "3",
+          district: "306",
+          localLevel: "30608",
+          wardNo: 10,
+          tole: "Naxal",
+          postalCode: "44600",
+          country: "NP",
+        },
+      },
     });
+    assert.equal(result.orchestrations.length, 2);
   }
+});
+
+test("a Patient the response mapping cannot read fails as a bad gateway", async () => {
+  let calls = 0;
+  const result = await execute(
+    nagarikIntegration(),
+    nagarikInput,
+    context,
+    async () =>
+      ++calls === 1 ? reply(valid) : reply({ id: "no-patient" }, 201),
+  );
+  assert.equal(result.status, 502);
+  assert.deepEqual(result.body.error, {
+    code: "response_mapping_failed",
+    message: "The NHID service returned an invalid response.",
+  });
 });
 
 test("Nagarik receives a validation error message", async () => {
@@ -242,7 +287,7 @@ test("Nagarik receives an NHID service error message", async () => {
       ++calls === 1 ? reply(valid) : reply({ error: "unavailable" }, 503),
   );
 
-  assert.equal(result.status, 503);
+  assert.equal(result.status, 502);
   assert.deepEqual(result.body, {
     requestId: nagarikInput.requestId,
     source: "nagarik-app",
@@ -252,6 +297,95 @@ test("Nagarik receives an NHID service error message", async () => {
       message: "The NHID service could not complete the registration.",
     },
   });
+});
+
+const messages: Record<string, string> = {
+  nhid_missing_fields:
+    "The registration is missing fields the NHID service requires.",
+  nhid_missing_gender_or_phone:
+    "Gender and mobile number are required to generate a new Health ID.",
+  nhid_rejected_resource:
+    "The NHID service rejected the generated patient resource.",
+  nhid_identity_mismatch:
+    "A record with this national ID exists, but its details do not match this registration.",
+  nhid_existing_record:
+    "A record with this national ID exists without a Health ID.",
+  nhid_service_failed: "The NHID service could not complete the registration.",
+};
+
+test("NHID service failures are classified by their error envelope", async () => {
+  const cases = [
+    {
+      status: 400,
+      message: "Missing field(s): National ID, given name",
+      expect: 400,
+      code: "nhid_missing_fields",
+      issues: ["National ID", "given name"],
+    },
+    {
+      status: 400,
+      message:
+        "Gender and phone number are required to generate a new HealthID",
+      expect: 400,
+      code: "nhid_missing_gender_or_phone",
+    },
+    {
+      status: 400,
+      message: "Not a valid FHIR Patient request: unknown variant `m`",
+      expect: 502,
+      code: "nhid_rejected_resource",
+    },
+    {
+      status: 409,
+      message:
+        "NID already exists but the provided data does not match the existing record",
+      expect: 409,
+      code: "nhid_identity_mismatch",
+    },
+    {
+      status: 409,
+      message: "NID already exists",
+      expect: 409,
+      code: "nhid_existing_record",
+    },
+    {
+      status: 500,
+      message: "Could not generate health ID checksum",
+      expect: 502,
+      code: "nhid_service_failed",
+    },
+    {
+      status: 502,
+      message: "FHIR request failed: connection refused",
+      expect: 502,
+      code: "nhid_service_failed",
+    },
+  ];
+  for (const item of cases) {
+    let calls = 0;
+    const result = await execute(
+      nagarikIntegration(),
+      nagarikInput,
+      context,
+      async () =>
+        ++calls === 1
+          ? reply(valid)
+          : reply({ status: false, message: item.message }, item.status),
+    );
+    assert.equal(result.status, item.expect, item.code);
+    assert.deepEqual(result.body, {
+      requestId: nagarikInput.requestId,
+      source: "nagarik-app",
+      status: "failed",
+      error: {
+        code: item.code,
+        message: messages[item.code],
+        ...(item.issues ? { issues: item.issues } : {}),
+      },
+    });
+    // No upstream text crosses the boundary.
+    assert.ok(!JSON.stringify(result.body).includes(item.message.slice(0, 20)));
+  }
 });
 
 test("failed FHIR validation returns an error without forwarding the resource", async () => {
