@@ -30,22 +30,21 @@ docker compose up -d --build
 ```
 
 The stack needs Docker Compose v2, mediator `.env` files, and a reachable JeMPI
-instance. Follow the [Linux setup guide](SETUP-LINUX.md) or the
-[Windows setup guide](SETUP-WINDOWS.md) before starting it.
+instance. Follow the deployment repository's README and the
+[Linux installation guide](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/04-linux-installation.md) before starting it.
 
 ## Documentation
 
-Start with the [documentation index](docs/00-documentation-index.md).
+Start with the [documentation index](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/00-documentation-index.md).
 
 | Need | Document |
 |---|---|
-| Install and configure the stack | [Linux setup](SETUP-LINUX.md) · [Windows setup](SETUP-WINDOWS.md) |
-| Deploy to a VPS | [VPS deployment](VPS-DEPLOYMENT.md) |
-| Understand components and data flows | [Architecture and DFDs](ARCHITECTURE-AND-DFD.md) |
-| Understand design choices | [Architecture decisions](ARCHITECTURE-DECISIONS.md) |
-| Review API endpoints and payloads | [API reference](docs/16-api-reference.md) |
+| Install and configure the stack | [Linux installation](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/04-linux-installation.md) · [Manual setup](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/07-manual-setup.md) |
+| Deploy to a VPS | [VPS deployment](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/05-vps-deployment.md) |
+| Understand components and data flows | [System architecture](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/14-system-architecture.md) · [Data flow diagrams](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/15-data-flow-diagrams.md) |
+| Review API endpoints and payloads | [API reference](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/16-api-reference.md) |
 | Configure identity matching | [JeMPI configuration](jempi-config/README.md) |
-| Understand Nepal Health IDs | [Health ID flow](HID-GENERATION-FLOW.md) |
+| Understand Nepal Health IDs | [Health ID generation](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/13-hid-generation.md) |
 
 ## Service documentation
 

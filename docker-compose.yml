@@ -98,7 +98,7 @@ services:
   # every restart. `--import-realm` additionally auto-creates the `openhie` realm
   # + a baseline `demo-client`/`demo` user from realm-export.json on every boot IF
   # the realm doesn't already exist — a safety net for "docker compose down wiped
-  # the realm again" (see DEMO.md), so there's always at least one working client
+  # the realm again", so there's always at least one working client
   # without needing to remember to run keycloak/setup.sh. Hospital clients
   # (keycloak/create-jwt-client.sh) still need re-creating after a real wipe —
   # this only guarantees the demo-client baseline, not the full hospital roster.
@@ -246,7 +246,7 @@ services:
   # Runs in Docker on the `openhim` network. OpenHIM reaches it at mediator:4000
   # (the channel route host, see MEDIATOR_ROUTE_HOST in services/fhir-mediator/.env). It
   # self-registers its role + channel with OpenHIM on startup.
-  # See FHIR_MEDIATOR_IMPLEMENTATION.md and services/fhir-mediator/README.md.
+  # See services/fhir-mediator/README.md.
   mediator:
     container_name: mediator
     build:

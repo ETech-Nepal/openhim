@@ -81,4 +81,4 @@ Build before invoking compiled tools:
 | `scripts/test-handler.sh` | Send resource smoke requests to a running stack |
 | `scripts/e2e.sh` | Exercise a running stack through OpenHIM |
 
-These commands are operational actions and are not invoked by routine validation. Longer historical design notes are in `../../FHIR_MEDIATOR_IMPLEMENTATION.md`; current source and tests define the migrated layout.
+These commands are operational actions and are not invoked by routine validation.
