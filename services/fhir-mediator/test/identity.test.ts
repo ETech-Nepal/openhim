@@ -43,7 +43,7 @@ axios.defaults.adapter = async (config) => {
 const { resolvePatientIdentity } = await import('../src/modules/patient/identity.js');
 const { patientHandler } = await import('../src/modules/patient/handler.js');
 const { bundleHandler } = await import('../src/modules/bundle/handler.js');
-const { SYS } = await import('../src/fhir/identifiers.js');
+const { SYS, healthIdIdentifier } = await import('../src/fhir/identifiers.js');
 
 const healthId = 'AA4812423';
 const identifier = (system, value) => ({ system, value });
@@ -125,7 +125,7 @@ test('identity keeps facility MRNs while replacing stale authoritative identifie
     identifier(SYS.HOSPITAL_MRN, 'new-mrn'),
     identifier(SYS.NATIONAL_ID, 'new-nid'),
     identifier(SYS.JEMPI_GOLDEN_UID, '0x1'),
-    identifier(SYS.NEPAL_HEALTH_ID, healthId),
+    healthIdIdentifier(healthId),
     identifier(SYS.HOSPITAL_MRN, 'old-mrn'),
   ]);
   assert.equal(calls[0].body.sourceId.facility, 'facility-a');
@@ -216,7 +216,7 @@ for (const kind of ['Patient', 'Bundle']) {
       const writtenPatient = kind === 'Patient' ? attempt.body : attempt.body.entry[0].resource;
       assert.deepEqual(
         writtenPatient.identifier.filter((id) => id.system === SYS.NEPAL_HEALTH_ID),
-        [identifier(SYS.NEPAL_HEALTH_ID, healthId)],
+        [healthIdIdentifier(healthId)],
       );
     }
     assert.equal(calls.filter((call) => call.url.pathname === '/crRegister').length, 2);

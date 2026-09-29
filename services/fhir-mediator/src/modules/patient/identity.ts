@@ -14,7 +14,13 @@ import { upstreamError } from '../../lib/errors.js';
 import { registerInteraction, resolveFacility } from '../../clients/jempi.js';
 import { searchByIdentifier } from '../../clients/hapi.js';
 import { orch } from '../../lib/orchestration.js';
-import { appendIdentifier, findIdentifier, hasIdentifier, SYS } from '../../fhir/identifiers.js';
+import {
+  appendIdentifier,
+  findIdentifier,
+  hasIdentifier,
+  healthIdIdentifier,
+  SYS,
+} from '../../fhir/identifiers.js';
 import { stampProvenance } from '../../fhir/provenance.js';
 import { generateHealthId, isValidHealthId } from './healthId.js';
 import { logger } from '../../lib/logger.js';
@@ -42,7 +48,7 @@ export async function resolvePatientIdentity(
     (i) => i.system !== SYS.NEPAL_HEALTH_ID && i.system !== SYS.JEMPI_GOLDEN_UID,
   );
   appendIdentifier(patient, SYS.JEMPI_GOLDEN_UID, link.goldenUid);
-  appendIdentifier(patient, SYS.NEPAL_HEALTH_ID, healthId);
+  patient.identifier.push(healthIdIdentifier(healthId));
   delete patient.id;
 
   const facility = resolveFacility(patient, clientId);

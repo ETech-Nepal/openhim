@@ -4,11 +4,19 @@ import { randomUUID } from 'node:crypto';
 import { optionalString } from '../../lib/sentinels.js';
 
 const SYS = {
-  BIMA: 'http://mohp.gov.np/fhir/NamingSystem/bima-insurance-number',
+  BIMA: 'http://hib.gov.np',
   HOSPITAL_MRN: 'http://mohp.gov.np/fhir/NamingSystem/hospital-mrn',
-  ENCOUNTER: 'http://mohp.gov.np/fhir/NamingSystem/encounter-number',
   REGISTRATION: 'http://mohp.gov.np/fhir/NamingSystem/registration-number',
   ACT_CLASS: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+  IDENTIFIER_TYPE: 'http://fhir.digitalhealth.gov.np/core/CodeSystem/np-core-identifier-type',
+};
+
+// NP Core np-enc-1: the encounter number is namespaced under the facility's NHFR code.
+const encounterSystem = (nhfrId: string) => `http://nhfr.digitalhealth.gov.np/${nhfrId}`;
+
+const PROFILE = {
+  PATIENT: 'http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient',
+  ENCOUNTER: 'http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-encounter',
 };
 
 const CLASS = { C: 'AMB', E: 'EMER', N: 'IMP' };
@@ -19,7 +27,16 @@ function compact<T extends object>(object: T): T {
 
 function buildPatient(row: CdrsEncounter, organizationRef: OrganizationReference) {
   const identifiers = [
-    ...(row.imis_id ? [{ system: SYS.BIMA, value: row.imis_id }] : []),
+    ...(row.imis_id
+      ? [
+          {
+            use: 'official',
+            type: { coding: [{ system: SYS.IDENTIFIER_TYPE, code: 'health-insurance-id' }] },
+            system: SYS.BIMA,
+            value: row.imis_id,
+          },
+        ]
+      : []),
     {
       system: SYS.HOSPITAL_MRN,
       value: row.hospital_patient_number,
@@ -29,6 +46,7 @@ function buildPatient(row: CdrsEncounter, organizationRef: OrganizationReference
 
   return compact({
     resourceType: 'Patient',
+    meta: { profile: [PROFILE.PATIENT] },
     identifier: identifiers,
     name: [
       compact({
@@ -60,8 +78,9 @@ function buildEncounter(
 
   return {
     resourceType: 'Encounter',
+    meta: { profile: [PROFILE.ENCOUNTER] },
     identifier: [
-      { system: SYS.ENCOUNTER, value: row.encounter_number },
+      { use: 'official', system: encounterSystem(nhfrId), value: row.encounter_number },
       ...(registrationNumber ? [{ system: SYS.REGISTRATION, value: registrationNumber }] : []),
     ],
     status: 'finished',
@@ -115,7 +134,7 @@ export function toFhirBundle(
         request: {
           method: 'POST',
           url: 'Encounter',
-          ifNoneExist: `identifier=${encodeURIComponent(`${SYS.ENCOUNTER}|${row.encounter_number}`)}`,
+          ifNoneExist: `identifier=${encodeURIComponent(`${encounterSystem(nhfrId)}|${row.encounter_number}`)}`,
         },
       },
     ],

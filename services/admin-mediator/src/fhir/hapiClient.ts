@@ -11,15 +11,13 @@ export const hapi = axios.create({
   },
 });
 
-/** GET a resource by id, or null on 404 (rather than throwing). */
-export async function readResource(type, id) {
-  try {
-    const { data } = await hapi.get(`/${type}/${encodeURIComponent(id)}`);
-    return data;
-  } catch (err) {
-    if (err.response?.status === 404) return null;
-    throw err;
-  }
+/**
+ * The Patient carrying an identifier, or null. Patients are looked up by Health ID or
+ * golden UID, never by resource id: the write path lets HAPI assign opaque ids.
+ */
+export async function findPatient(system, value) {
+  const { data } = await hapi.get(`/Patient?${new URLSearchParams({ identifier: `${system}|${value}` })}`);
+  return data.entry?.[0]?.resource ?? null;
 }
 
 /** Every entry across a paged search, following `next` links. */

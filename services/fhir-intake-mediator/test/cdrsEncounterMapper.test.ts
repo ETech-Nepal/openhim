@@ -34,8 +34,23 @@ test('maps BIMA, facility MRN, demographics, and managing Organization', () => {
   const bundle = toFhirBundle(validatedRow(), context);
   const patient = bundle.entry[0].resource;
 
+  assert.deepEqual(patient.meta.profile, [
+    'http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient',
+  ]);
   assert.deepEqual(patient.identifier, [
-    { system: 'http://mohp.gov.np/fhir/NamingSystem/bima-insurance-number', value: '771929535' },
+    {
+      use: 'official',
+      type: {
+        coding: [
+          {
+            system: 'http://fhir.digitalhealth.gov.np/core/CodeSystem/np-core-identifier-type',
+            code: 'health-insurance-id',
+          },
+        ],
+      },
+      system: 'http://hib.gov.np',
+      value: '771929535',
+    },
     {
       system: 'http://mohp.gov.np/fhir/NamingSystem/hospital-mrn',
       value: '2405078',
@@ -126,7 +141,7 @@ test('maps encounter and registration identifiers without source workflow fields
   const encounter = toFhirBundle(row, context).entry[1].resource;
 
   assert.deepEqual(encounter.identifier, [
-    { system: 'http://mohp.gov.np/fhir/NamingSystem/encounter-number', value: '0002110732' },
+    { use: 'official', system: 'http://nhfr.digitalhealth.gov.np/3130400221', value: '0002110732' },
     { system: 'http://mohp.gov.np/fhir/NamingSystem/registration-number', value: 'REG-0001' },
   ]);
   for (const field of [
@@ -154,7 +169,7 @@ test('URL-encodes reserved encounter-number characters and does not alter the no
 
   assert.equal(
     bundle.entry[1].request.ifNoneExist,
-    'identifier=http%3A%2F%2Fmohp.gov.np%2Ffhir%2FNamingSystem%2Fencounter-number%7C000%7Cpatient%3Freplay%3D1%26next',
+    'identifier=http%3A%2F%2Fnhfr.digitalhealth.gov.np%2F3130400221%7C000%7Cpatient%3Freplay%3D1%26next',
   );
   assert.deepEqual(row, original);
 });

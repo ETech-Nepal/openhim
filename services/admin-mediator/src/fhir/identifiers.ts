@@ -1,7 +1,7 @@
 // @ts-nocheck
 // Mirrors mediator/src/fhir/identifiers.js — keep the systems identical across services.
 export const SYS = {
-  NEPAL_HEALTH_ID: 'http://mohp.gov.np/fhir/NamingSystem/nepal-health-id',
+  NEPAL_HEALTH_ID: 'http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id',
   JEMPI_GOLDEN_UID: 'http://mohp.gov.np/fhir/NamingSystem/jempi-golden-uid',
   // Provenance stamped by the write-side mediator; lets a future split reassign
   // clinical resources to the right person.

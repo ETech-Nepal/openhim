@@ -16,9 +16,8 @@ type HttpClient = {
   post(path: string, resource: unknown, options: { headers: Headers }): Promise<{ data: unknown }>;
 };
 
-// The deployed NHFR NamingSystem (NP Core's canonical is https://nhfr.mohp.gov.np;
-// the running stack uses this form — keep them aligned).
-const NHFR_SYSTEM = 'http://mohp.gov.np/fhir/NamingSystem/nhfr';
+// NP Core 1.0.0 NepalNHFR NamingSystem.
+const NHFR_SYSTEM = 'http://nhfr.digitalhealth.gov.np';
 
 export class DownstreamEnvelopeError extends Error {
   constructor(message: string) {

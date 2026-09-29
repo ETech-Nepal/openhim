@@ -40,9 +40,13 @@ export async function listGoldenIds(orchestrations) {
 /** A golden record plus every interaction linked to it. */
 export async function getExpandedGolden(gid, orchestrations) {
   const r = await call('JeMPI expandedGoldenRecord', '/expandedGoldenRecord', { gid }, orchestrations);
-  // JeMPI answers 200 with an { error } body for a gid that no longer exists (e.g. a
-  // golden consumed by an earlier merge), so success needs an explicit shape check.
-  if (!r.ok || r.data?.error) return { ok: false, error: r.data?.error ?? r.error, record: null };
+  // JeMPI answers a gid that no longer exists (e.g. a golden consumed by an earlier
+  // merge) with an { error } body, as 400 or 200 depending on version. `gone` separates
+  // that from JeMPI being down (5xx or no answer), which proves nothing.
+  if (!r.ok || r.data?.error) {
+    const gone = Boolean(r.data?.error) && r.status > 0 && r.status < 500;
+    return { ok: false, gone, error: r.data?.error ?? r.error, record: null };
+  }
   return { ok: true, record: r.data };
 }
 

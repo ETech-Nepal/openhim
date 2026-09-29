@@ -8,7 +8,8 @@ import { STATUS } from '../db/reviewRepo.js';
 import { scanForDuplicates } from '../services/scanner.js';
 import { mergeGoldenRecords } from '../services/mergeService.js';
 import { getExpandedGolden, goldenAuditTrail } from '../providers/jempiProvider.js';
-import { readResource, searchAll } from '../fhir/hapiClient.js';
+import { findPatient, searchAll } from '../fhir/hapiClient.js';
+import { SYS } from '../fhir/identifiers.js';
 
 const reply = (res, status, body, orchestrations = []) =>
   res.status(status).send(buildOpenHIMResponse({ status, body, orchestrations }));
@@ -56,10 +57,10 @@ export async function detailHandler(req, res, next) {
       let patient = null;
       const clinical = {};
       if (healthId) {
-        patient = await readResource('Patient', healthId).catch(() => null);
-        for (const type of config.MERGE_REFERENCING_TYPES) {
+        patient = await findPatient(SYS.NEPAL_HEALTH_ID, healthId).catch(() => null);
+        for (const type of patient ? config.MERGE_REFERENCING_TYPES : []) {
           try {
-            const found = await searchAll(type, { patient: `Patient/${healthId}`, _count: '200' });
+            const found = await searchAll(type, { patient: `Patient/${patient.id}`, _count: '200' });
             if (found.length) clinical[type] = found.length;
           } catch (err) {
             logger.warn({ err: err.message, type, healthId }, 'clinical count failed');

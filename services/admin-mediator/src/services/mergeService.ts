@@ -2,7 +2,7 @@
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { orch } from '../lib/orchestration.js';
-import { hapi, readResource, searchAll } from '../fhir/hapiClient.js';
+import { findPatient, hapi, searchAll } from '../fhir/hapiClient.js';
 import { SYS, appendIdentifier } from '../fhir/identifiers.js';
 import { getExpandedGolden, relinkInteraction } from '../providers/jempiProvider.js';
 
@@ -50,6 +50,7 @@ function repointReferences(node, fromId, toId, counter = { n: 0 }) {
 /** Step 1 — move every interaction off the losing golden record in JeMPI. */
 async function relinkInJempi(loserUid, survivorUid, score, orchestrations) {
   const loser = await getExpandedGolden(loserUid, orchestrations);
+  if (!loser.ok && !loser.gone) return { ok: false, error: `losing golden ${loserUid} unreadable: ${loser.error}`, relinked: [] };
   if (!loser.ok) {
     // JeMPI deletes a golden once its last interaction leaves. On a retry after a
     // partial merge the losing golden is simply gone — that is success, not failure.
@@ -74,30 +75,36 @@ async function relinkInJempi(loserUid, survivorUid, score, orchestrations) {
 }
 
 /** Step 2 — make HAPI agree: one active Patient, all clinical records on it. */
-async function reconcileHapi({ survivorHealthId, loserHealthId }, orchestrations) {
+async function reconcileHapi({ survivorHealthId, loserHealthId, loserUid }, orchestrations) {
   const moved = {};
-  if (!survivorHealthId || !loserHealthId) {
-    return { ok: false, error: 'missing Health ID on one of the golden records — cannot reconcile HAPI' };
+  if (!survivorHealthId) {
+    return { ok: false, error: 'missing Health ID on the surviving golden record — cannot reconcile HAPI' };
   }
   if (survivorHealthId === loserHealthId) {
     return { ok: true, moved, note: 'both golden records already share one Health ID' };
   }
 
-  const survivor = await readResource('Patient', survivorHealthId);
-  const loser = await readResource('Patient', loserHealthId);
-  if (!survivor) return { ok: false, error: `survivor Patient/${survivorHealthId} not found in HAPI` };
+  const survivor = await findPatient(SYS.NEPAL_HEALTH_ID, survivorHealthId);
+  // On a retry JeMPI has already deleted the losing golden and its Health ID; the
+  // retired Patient still carries the golden UID it came from.
+  const loser = loserHealthId
+    ? await findPatient(SYS.NEPAL_HEALTH_ID, loserHealthId)
+    : await findPatient(SYS.JEMPI_GOLDEN_UID, loserUid);
+  if (!survivor) return { ok: false, error: `survivor Patient with Health ID ${survivorHealthId} not found in HAPI` };
   if (!loser) {
-    logger.warn({ loserHealthId }, 'losing Patient not in HAPI — nothing to reconcile');
+    logger.warn({ loserHealthId, loserUid }, 'losing Patient not in HAPI — nothing to reconcile');
     return { ok: true, moved, note: 'losing Patient absent from HAPI' };
   }
+  const survivorId = survivor.id;
+  const loserId = loser.id;
 
   // 2a. Move clinical records onto the survivor. Done BEFORE deactivating the loser so
   // a failure here leaves the loser active and the records still reachable.
   for (const type of config.MERGE_REFERENCING_TYPES) {
-    const resources = await searchAll(type, { patient: patientRef(loserHealthId), _count: '200' });
+    const resources = await searchAll(type, { patient: patientRef(loserId), _count: '200' });
     let count = 0;
     for (const resource of resources) {
-      if (repointReferences(resource, loserHealthId, survivorHealthId) === 0) continue;
+      if (repointReferences(resource, loserId, survivorId) === 0) continue;
       const { status } = await hapi.put(`/${type}/${resource.id}`, resource);
       orchestrations.push(orch(`HAPI move ${type}/${resource.id}`, 'PUT', `/${type}/${resource.id}`, null, status, null));
       count++;
@@ -109,7 +116,7 @@ async function reconcileHapi({ survivorHealthId, loserHealthId }, orchestrations
   // survivor, so a lookup by any of them still finds the person.
   //
   // Identity-owning systems are deliberately NOT copied:
-  //  * nepal-health-id — the survivor's Health ID is its resource id, 1:1 with its
+  //  * nepal-health-id — the survivor keeps exactly one Health ID, 1:1 with its
   //    golden record. Copying the retired one makes `Patient?identifier=...|<oldId>`
   //    return two records (survivor + retired) and breaks that 1:1 invariant, which is
   //    what the whole write path relies on to converge duplicates.
@@ -124,9 +131,9 @@ async function reconcileHapi({ survivorHealthId, loserHealthId }, orchestrations
     if (IDENTITY_SYSTEMS.has(ident.system)) continue;
     appendIdentifier(survivor, ident.system, ident.value);
   }
-  addLink(survivor, loserHealthId, 'replaces');
-  const { status: sStatus } = await hapi.put(`/Patient/${survivorHealthId}`, survivor);
-  orchestrations.push(orch('HAPI update survivor', 'PUT', `/Patient/${survivorHealthId}`, null, sStatus, null));
+  addLink(survivor, loserId, 'replaces');
+  const { status: sStatus } = await hapi.put(`/Patient/${survivorId}`, survivor);
+  orchestrations.push(orch('HAPI update survivor', 'PUT', `/Patient/${survivorId}`, null, sStatus, null));
 
   // 2c. Retire the loser — but KEEP the resource. JeMPI deleted the losing golden and
   // its auxId, so this inactive Patient is the only thing left that can resolve the
@@ -138,11 +145,12 @@ async function reconcileHapi({ survivorHealthId, loserHealthId }, orchestrations
   // inactive shell and the survivor. `replaces`/`replaced-by` already expresses the
   // relationship, and it is the link a consumer is meant to follow.
   loser.active = false;
-  addLink(loser, survivorHealthId, 'replaced-by');
-  const { status: lStatus } = await hapi.put(`/Patient/${loserHealthId}`, loser);
-  orchestrations.push(orch('HAPI retire loser', 'PUT', `/Patient/${loserHealthId}`, null, lStatus, null));
+  addLink(loser, survivorId, 'replaced-by');
+  const { status: lStatus } = await hapi.put(`/Patient/${loserId}`, loser);
+  orchestrations.push(orch('HAPI retire loser', 'PUT', `/Patient/${loserId}`, null, lStatus, null));
 
-  return { ok: true, moved, retiredHealthId: loserHealthId, survivingHealthId: survivorHealthId };
+  const retiredHealthId = loser.identifier?.find((i) => i.system === SYS.NEPAL_HEALTH_ID)?.value ?? loserHealthId;
+  return { ok: true, moved, retiredHealthId, survivingHealthId: survivorHealthId };
 }
 
 /**
@@ -168,6 +176,9 @@ export async function mergeGoldenRecords({ survivorUid, loserUid, score = 1 }) {
     return { ok: false, status: 'INVALID', error: `survivor golden ${survivorUid} not found: ${survivorGolden.error}`, orchestrations };
   }
   const loserGolden = await getExpandedGolden(loserUid, orchestrations);
+  if (!loserGolden.ok && !loserGolden.gone) {
+    return { ok: false, status: 'FAILED', error: `losing golden ${loserUid} unreadable: ${loserGolden.error}`, orchestrations };
+  }
 
   const survivorHealthId = survivorGolden.record?.goldenRecord?.uniqueGoldenRecordData?.auxId ?? null;
   const loserHealthId = loserGolden.ok
@@ -176,11 +187,13 @@ export async function mergeGoldenRecords({ survivorUid, loserUid, score = 1 }) {
 
   const jempi = await relinkInJempi(loserUid, survivorUid, score, orchestrations);
   if (!jempi.ok) {
-    return { ok: false, status: 'FAILED', error: jempi.error, orchestrations };
+    // Once any interaction has moved, JeMPI is changed: retry, do not treat it as untouched.
+    const status = jempi.relinked?.length ? 'MERGE_PARTIAL' : 'FAILED';
+    return { ok: false, status, error: jempi.error, result: { jempi }, orchestrations };
   }
 
   try {
-    const hapiResult = await reconcileHapi({ survivorHealthId, loserHealthId }, orchestrations);
+    const hapiResult = await reconcileHapi({ survivorHealthId, loserHealthId, loserUid }, orchestrations);
     if (!hapiResult.ok) {
       // Identity is already merged in JeMPI; HAPI is not. Surface it as PARTIAL so it
       // stays visible and retryable rather than being reported as a clean success.
@@ -190,7 +203,7 @@ export async function mergeGoldenRecords({ survivorUid, loserUid, score = 1 }) {
     return {
       ok: true,
       status: 'MERGED',
-      result: { survivorUid, loserUid, survivorHealthId, retiredHealthId: loserHealthId, jempi, hapi: hapiResult },
+      result: { survivorUid, loserUid, survivorHealthId, retiredHealthId: hapiResult.retiredHealthId ?? loserHealthId, jempi, hapi: hapiResult },
       orchestrations,
     };
   } catch (err) {

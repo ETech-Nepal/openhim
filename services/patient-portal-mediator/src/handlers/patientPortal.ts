@@ -152,7 +152,8 @@ function mergeProfile(patients) {
 function shapeEncounter(e, orgNames = new Map()) {
   return {
     id: e.id, status: e.status || null,
-    visitNumber: identifierValue(e, SYS.ENCOUNTER_NUMBER),
+    visitNumber:
+      (e.identifier || []).find((i) => i.system?.startsWith(SYS.ENCOUNTER_NUMBER_PREFIX))?.value || null,
     class: e.class?.display || e.class?.code || null,
     type: e.type?.[0]?.text || e.type?.[0]?.coding?.[0]?.display || null,
     reason: e.reasonCode?.[0]?.text || e.reasonCode?.[0]?.coding?.[0]?.display || null,

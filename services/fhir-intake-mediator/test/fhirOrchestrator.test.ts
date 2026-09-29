@@ -54,7 +54,7 @@ test('rejects a downstream envelope with a non-JSON application body', () => {
   );
 });
 
-const NHFR = 'http://mohp.gov.np/fhir/NamingSystem/nhfr';
+const NHFR = 'http://nhfr.digitalhealth.gov.np';
 
 test('findOrganizationByNhfr searches by identifier and returns the one match', async () => {
   const http = {

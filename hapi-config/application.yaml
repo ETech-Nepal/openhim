@@ -25,6 +25,10 @@ spring:
 hapi:
   fhir:
     default_encoding: json
+    # The mediators search by identifier right after writing (Health ID uniqueness,
+    # read-before-merge). A reused cached result misses the new write and drops
+    # MRNs from other hospitals, so always run searches fresh.
+    reuse_cached_search_results_millis: 0
     narrative_enabled: false
     server_id_strategy: uuid
     # Allow client-assigned ids on PUT (e.g. PUT /Patient/{nepalHealthId}); the

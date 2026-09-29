@@ -12,7 +12,7 @@ axios.defaults.adapter = async config => {
   let data;
   if (url.host === 'jempi.invalid' && url.pathname === '/expandedGoldenRecord') {
     if (body.gid === '0x2' && state.lookupFailure) { status = 503; data = { error: 'service unavailable' }; }
-    else if (body.gid === '0x2' && state.interactions.length === 0) data = { error: 'golden record not found' };
+    else if (body.gid === '0x2' && state.interactions.length === 0) { status = 400; data = { error: 'Golden Record does not exist', goldenID: '0x2' }; }
     else data = {
       goldenRecord: { uid: body.gid, uniqueGoldenRecordData: { auxId: body.gid === '0x1' ? 'AA4812423' : 'BB0000000' } },
       interactionsWithScore: body.gid === '0x2' ? state.interactions.map(uid => ({ interaction: { uid }, score: 1 })) : [],
