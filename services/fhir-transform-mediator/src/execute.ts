@@ -27,6 +27,7 @@ const outcomeSchema = z.object({
         code: z.string().min(1),
         diagnostics: z.string().optional(),
         expression: z.array(z.string()).optional(),
+        location: z.array(z.string()).optional(),
         details: z.object({ text: z.string().optional() }).optional(),
       }),
     )
@@ -55,14 +56,34 @@ const issueCodes = new Set([
   "informational",
 ]);
 
-// Diagnostics and FHIRPath expressions can contain patient data. Only known codes leave this boundary.
+// NP Core requires a Health ID the NHID generator has not assigned yet, so this error is expected.
+const isMissingHealthId = (
+  issue: z.infer<typeof outcomeSchema>["issue"][number],
+) =>
+  ["required", "structure"].includes(issue.code) &&
+  [issue.diagnostics, issue.details?.text].some((message) =>
+    message?.includes(
+      "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+    ),
+  );
+
+// The validator's own text is relayed to the caller that submitted the data, as the NHID
+// service's message is. It never enters orchestrations or logs.
 function safeIssues(body: unknown) {
   const parsed = outcomeSchema.safeParse(body);
   return parsed.success
-    ? parsed.data.issue.map((issue) => ({
-        severity: issue.severity,
-        code: issueCodes.has(issue.code) ? issue.code : "processing",
-      }))
+    ? parsed.data.issue
+        .filter((issue) => !isMissingHealthId(issue))
+        .map((issue) => {
+          const message = issue.diagnostics ?? issue.details?.text;
+          const expression = (issue.expression ?? issue.location)?.[0];
+          return {
+            severity: issue.severity,
+            code: issueCodes.has(issue.code) ? issue.code : "processing",
+            ...(expression && { expression }),
+            ...(message && { message }),
+          };
+        })
     : undefined;
 }
 
@@ -73,18 +94,7 @@ function onlyMissingHealthId(body: unknown) {
         ["fatal", "error"].includes(issue.severity),
       )
     : [];
-  return (
-    errors.length > 0 &&
-    errors.every(
-      (issue) =>
-        ["required", "structure"].includes(issue.code) &&
-        [issue.diagnostics, issue.details?.text].some((message) =>
-          message?.includes(
-            "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
-          ),
-        ),
-    )
-  );
+  return errors.length > 0 && errors.every(isMissingHealthId);
 }
 
 const nhidErrorSchema = z.object({
@@ -99,12 +109,16 @@ const nhidRequiredFields = new Set([
 ]);
 const missingPrefix = "Missing field(s): ";
 
-// The NHID service reports every failure as {status:false,message}. A message can echo the
-// submitted resource or an OperationOutcome, so only the fixed vocabulary below is classified
-// and no upstream text is forwarded.
+// The NHID service reports every failure as {status:false,message}. The message is classified
+// into a stable code and relayed only to mappings with toError, which answer the caller that
+// submitted the data. It never enters the generic error body, orchestrations, or logs.
 function nhidError(status: number, body: unknown) {
   const parsed = nhidErrorSchema.safeParse(body);
   const message = parsed.success ? parsed.data.message : "";
+  return { ...classifyNhid(status, message), ...(message && { message }) };
+}
+
+function classifyNhid(status: number, message: string) {
   if (message.startsWith(missingPrefix)) {
     const fields = message
       .slice(missingPrefix.length)
@@ -165,6 +179,7 @@ function mappingFailure(
   stage: string,
   issues?: unknown,
   orchestrations: Orchestration[] = [],
+  upstreamMessage?: string,
 ): Result {
   const mapper = mappings[integration.mapping];
   return {
@@ -178,7 +193,7 @@ function mappingFailure(
       orchestrations,
     ),
     ...(mapper.toError && {
-      body: mapper.toError(input, error, issues, stage),
+      body: mapper.toError(input, error, issues, stage, upstreamMessage),
     }),
   };
 }
@@ -195,7 +210,13 @@ export function transform(
   } catch (error) {
     const issues =
       error instanceof z.ZodError
-        ? error.issues.map((issue) => ({ code: issue.code, path: issue.path }))
+        ? // Zod messages can echo submitted values; keep only the code, path, and type/key names.
+          error.issues.map((issue) => ({
+            code: issue.code,
+            path: issue.path,
+            ...(issue.code === "invalid_type" && { received: issue.received }),
+            ...(issue.code === "unrecognized_keys" && { keys: issue.keys }),
+          }))
         : undefined;
     return failure(
       400,
@@ -321,6 +342,7 @@ export async function execute(
           generatorStage,
           classified.issues,
           orchestrations,
+          classified.message,
         );
       }
       try {

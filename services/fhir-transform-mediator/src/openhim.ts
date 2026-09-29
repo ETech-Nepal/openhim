@@ -33,7 +33,11 @@ export function mediatorDefinition(
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",
-    timeout: (integration.validation?.timeoutMs ?? 0) + 5000,
+    // The mediator calls the validator, then the NHID generator, one after the other.
+    timeout:
+      (integration.validation?.timeoutMs ?? 0) +
+      (integration.nhidGenerator?.timeoutMs ?? 0) +
+      5000,
     properties: [],
     txViewAcl: [],
     txViewFullAcl: [],

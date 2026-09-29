@@ -43,6 +43,53 @@ const errorMessages: Record<string, string> = {
   upstream_unavailable: "The NHID service is unavailable.",
 };
 
+// Fixed text per field so the app can show why a request was rejected without echoing its values.
+const fieldRules: Record<string, string> = {
+  requestId: "must be 1-100 characters",
+  source: 'must be "nagarik-app"',
+  "citizen.nationalId": "must be 1-100 characters",
+  "citizen.citizenshipNumber": "must be 1-100 characters",
+  "citizen.healthInsuranceNumber": "must be 1-100 characters",
+  "citizen.nameEn.given": "must be 1-100 characters",
+  "citizen.nameEn.family": "must be 1-100 characters",
+  "citizen.nameNe.given": "must be 1-100 characters",
+  "citizen.nameNe.family": "must be 1-100 characters",
+  "citizen.gender": "must be one of M, F, O, U",
+  "citizen.dobAD": "must be a valid AD date in YYYY-MM-DD format",
+  "citizen.dobBS":
+    "must be a BS date in YYYY-MM-DD format (month 01-12, day 01-32)",
+  "citizen.casteEthnicityCode": 'must be one of "1" to "6"',
+  "citizen.mobile":
+    "must be +977 followed by 10 digits, for example +9779801234567",
+  "citizen.email": "must be a valid email address of at most 254 characters",
+  "citizen.permanentAddress.provinceCode": "must be 1-2 digits",
+  "citizen.permanentAddress.districtCode": "must be 3 digits",
+  "citizen.permanentAddress.localLevelCode": "must be 5 digits",
+  "citizen.permanentAddress.wardNo": "must be a whole number from 1 to 99",
+  "citizen.permanentAddress.tole": "must be 1-200 characters",
+  "citizen.permanentAddress.postalCode": "must be 1-20 characters",
+};
+
+const mappingIssue = z
+  .object({
+    code: z.string(),
+    path: z.array(z.union([z.string(), z.number()])),
+    received: z.string().optional(),
+    keys: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+function describe(issue: z.infer<typeof mappingIssue>) {
+  const field = issue.path.join(".");
+  const message =
+    issue.code === "unrecognized_keys"
+      ? `${field || "request"} has unknown field(s): ${issue.keys?.join(", ")}`
+      : issue.code === "invalid_type" && issue.received === "undefined"
+        ? `${field} is required`
+        : `${field} ${fieldRules[field] ?? "is invalid"}`;
+  return { ...issue, field, message };
+}
+
 const name = z
   .object({
     given: z.string().trim().min(1).max(100),
@@ -62,7 +109,12 @@ const inputSchema = z
         nameEn: name,
         nameNe: name.optional(),
         gender: z.enum(["M", "F", "O", "U"]),
-        dobBS: z.string().date().optional(),
+        // Bikram Sambat months run up to 32 days, so this is not a Gregorian date check.
+        // ponytail: shape only; a BS calendar table would reject e.g. 2047-12-32.
+        dobBS: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[0-2])$/)
+          .optional(),
         dobAD: z.string().date(),
         casteEthnicityCode: z.enum(["1", "2", "3", "4", "5", "6"]).optional(),
         mobile: z
@@ -346,11 +398,134 @@ export function fromFhir(
   };
 }
 
+// Maps a validator FHIRPath back to the Nagarik field it was built from. It does not check
+// anything; the validator decides what is wrong. Indexes are looked up in the Patient toFhir
+// builds from the same input, because optional fields shift them.
+const identifierFields: Record<string, string> = {
+  [identifierSystems.nationalId]: "citizen.nationalId",
+  [identifierSystems.citizenshipNumber]: "citizen.citizenshipNumber",
+  [identifierSystems.healthInsuranceNumber]: "citizen.healthInsuranceNumber",
+};
+const addressFields: Record<string, string> = {
+  [addressExtensions.province]: "provinceCode",
+  [addressExtensions.district]: "districtCode",
+  [addressExtensions.localLevel]: "localLevelCode",
+};
+type Built = {
+  identifier?: Array<{ system?: string }>;
+  extension?: Array<{ url?: string }>;
+  telecom?: Array<{ system?: string }>;
+  address?: Array<{ extension?: Array<{ url?: string }> }>;
+};
+
+function fieldFor(patient: Built, expression: string) {
+  const [, first, second] = expression.split(".").map((segment) => {
+    const [, name, index] = segment.match(/^(\w+)(?:\[(\d+)\])?$/) ?? [];
+    return { name, index: index === undefined ? undefined : Number(index) };
+  });
+  const at = <T>(list: T[] | undefined, index?: number) =>
+    index === undefined ? undefined : list?.[index];
+  switch (first?.name) {
+    case "identifier": {
+      const system = at(patient.identifier, first.index)?.system;
+      return system ? identifierFields[system] : undefined;
+    }
+    case "name": {
+      const name = first.index === 1 ? "citizen.nameNe" : "citizen.nameEn";
+      return second?.name === "given" || second?.name === "family"
+        ? `${name}.${second.name}`
+        : name;
+    }
+    case "gender":
+      return "citizen.gender";
+    case "birthDate":
+      return second?.name === "extension" ? "citizen.dobBS" : "citizen.dobAD";
+    case "_birthDate":
+      return "citizen.dobBS";
+    case "extension":
+      return at(patient.extension, first.index)?.url === casteExtension
+        ? "citizen.casteEthnicityCode"
+        : undefined;
+    case "telecom":
+      return { phone: "citizen.mobile", email: "citizen.email" }[
+        at(patient.telecom, first.index)?.system ?? ""
+      ];
+    case "address": {
+      const address = "citizen.permanentAddress";
+      if (second?.name === "extension") {
+        const url = at(patient.address?.[0]?.extension, second.index)?.url;
+        return url && addressFields[url]
+          ? `${address}.${addressFields[url]}`
+          : address;
+      }
+      if (second?.name === "line")
+        return second.index === 1 ? `${address}.tole` : `${address}.wardNo`;
+      if (second?.name === "postalCode") return `${address}.postalCode`;
+      return address;
+    }
+  }
+  return undefined;
+}
+
+const validationIssue = z
+  .object({
+    severity: z.string(),
+    code: z.string(),
+    expression: z.string().optional(),
+    message: z.string().optional(),
+  })
+  .passthrough();
+
+// Blocking validation issues, one per field. A mapped issue gets a short message naming the
+// field and keeps the validator's text as `detail`; an unmapped one keeps the validator's text.
+function validationIssues(input: unknown, issues: unknown) {
+  if (!Array.isArray(issues)) return [];
+  let patient: Built = {};
+  try {
+    patient = toFhir(input, {}) as Built;
+  } catch {
+    // Unreachable after a successful mapping; unmapped issues still get the validator's text.
+  }
+  const seen = new Set<string>();
+  return issues.flatMap((issue) => {
+    const parsed = validationIssue.safeParse(issue);
+    if (!parsed.success || !["fatal", "error"].includes(parsed.data.severity))
+      return [];
+    const { message: detail, ...rest } = parsed.data;
+    const field = rest.expression && fieldFor(patient, rest.expression);
+    if (!field)
+      return [
+        { ...rest, message: detail ?? errorMessages.fhir_validation_failed },
+      ];
+    // The validator can report one bad value at several depths.
+    if (seen.has(field)) return [];
+    seen.add(field);
+    const rule =
+      rest.code === "code-invalid"
+        ? "is not a valid NP Core code"
+        : rest.code === "required"
+          ? "is required by NP Core"
+          : "failed NP Core validation";
+    return [
+      {
+        ...rest,
+        field,
+        path: field.split("."),
+        message: `${field} ${rule}`,
+        ...(detail && { detail }),
+      },
+    ];
+  });
+}
+
+// Flat error in the NHID service's style: {requestId, source, status: false, message}. `code` is
+// the stable value to branch on; `field`/`path` name the first bad input field.
 export function toError(
   input: unknown,
   error: string,
   issues?: unknown,
   stage?: string,
+  upstreamMessage?: string,
 ): Record<string, unknown> {
   const request = z
     .object({
@@ -359,20 +534,40 @@ export function toError(
     })
     .passthrough()
     .safeParse(input);
+  const fields =
+    error === "request_mapping_failed" && Array.isArray(issues)
+      ? issues.flatMap((issue) => {
+          const parsed = mappingIssue.safeParse(issue);
+          return parsed.success ? [describe(parsed.data)] : [];
+        })
+      : [];
+  const validation =
+    error === "fhir_validation_failed" ? validationIssues(input, issues) : [];
+  const located =
+    fields[0] ??
+    validation.flatMap((issue) => ("field" in issue ? [issue] : []))[0];
+  const message =
+    upstreamMessage ??
+    (validation.length
+      ? validation.map((issue) => issue.message).join("; ")
+      : undefined) ??
+    (fields.length
+      ? fields.map((field) => field.message).join("; ")
+      : stage === "request-validation" && error === "upstream_timeout"
+        ? "The validation service did not respond in time."
+        : stage === "request-validation" && error === "upstream_unavailable"
+          ? "The validation service is unavailable."
+          : (errorMessages[error] ??
+            "The registration could not be completed."));
   return {
     ...(request.success && { requestId: request.data.requestId }),
     source: "nagarik-app",
-    status: "failed",
-    error: {
-      code: error,
-      message:
-        stage === "request-validation" && error === "upstream_timeout"
-          ? "The validation service did not respond in time."
-          : stage === "request-validation" && error === "upstream_unavailable"
-            ? "The validation service is unavailable."
-            : (errorMessages[error] ??
-              "The registration could not be completed."),
-      ...(issues !== undefined ? { issues } : {}),
-    },
+    status: false,
+    message,
+    code: error,
+    ...(located && { field: located.field, path: located.path }),
+    // One issue is already in message/field/path; list them only when there are several.
+    ...(validation.length > 1 && { issues: validation }),
+    ...(fields.length > 1 && { issues: fields }),
   };
 }

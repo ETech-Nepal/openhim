@@ -20,6 +20,7 @@ export type Mapping = {
     error: string,
     issues?: unknown,
     stage?: string,
+    upstreamMessage?: string,
   ): Record<string, unknown>;
 };
 

@@ -224,9 +224,12 @@ test("a Patient the response mapping cannot read fails as a bad gateway", async 
       ++calls === 1 ? reply(valid) : reply({ id: "no-patient" }, 201),
   );
   assert.equal(result.status, 502);
-  assert.deepEqual(result.body.error, {
-    code: "response_mapping_failed",
+  assert.deepEqual(result.body, {
+    requestId: nagarikInput.requestId,
+    source: "nagarik-app",
+    status: false,
     message: "The NHID service returned an invalid response.",
+    code: "response_mapping_failed",
   });
 });
 
@@ -246,12 +249,9 @@ test("Nagarik receives a validation error message", async () => {
   assert.deepEqual(result.body, {
     requestId: nagarikInput.requestId,
     source: "nagarik-app",
-    status: "failed",
-    error: {
-      code: "fhir_validation_failed",
-      message: "The submitted citizen data failed validation.",
-      issues: [{ severity: "error", code: "required" }],
-    },
+    status: false,
+    message: "The submitted citizen data failed validation.",
+    code: "fhir_validation_failed",
   });
 });
 
@@ -269,11 +269,9 @@ test("Nagarik identifies a validation service outage", async () => {
   assert.deepEqual(result.body, {
     requestId: nagarikInput.requestId,
     source: "nagarik-app",
-    status: "failed",
-    error: {
-      code: "upstream_unavailable",
-      message: "The validation service is unavailable.",
-    },
+    status: false,
+    message: "The validation service is unavailable.",
+    code: "upstream_unavailable",
   });
 });
 
@@ -291,36 +289,19 @@ test("Nagarik receives an NHID service error message", async () => {
   assert.deepEqual(result.body, {
     requestId: nagarikInput.requestId,
     source: "nagarik-app",
-    status: "failed",
-    error: {
-      code: "nhid_service_failed",
-      message: "The NHID service could not complete the registration.",
-    },
+    status: false,
+    message: "The NHID service could not complete the registration.",
+    code: "nhid_service_failed",
   });
 });
 
-const messages: Record<string, string> = {
-  nhid_missing_fields:
-    "The registration is missing fields the NHID service requires.",
-  nhid_missing_gender_or_phone:
-    "Gender and mobile number are required to generate a new Health ID.",
-  nhid_rejected_resource:
-    "The NHID service rejected the generated patient resource.",
-  nhid_identity_mismatch:
-    "A record with this national ID exists, but its details do not match this registration.",
-  nhid_existing_record:
-    "A record with this national ID exists without a Health ID.",
-  nhid_service_failed: "The NHID service could not complete the registration.",
-};
-
-test("NHID service failures are classified by their error envelope", async () => {
+test("NHID service failures are classified and their message relayed", async () => {
   const cases = [
     {
       status: 400,
       message: "Missing field(s): National ID, given name",
       expect: 400,
       code: "nhid_missing_fields",
-      issues: ["National ID", "given name"],
     },
     {
       status: 400,
@@ -376,15 +357,10 @@ test("NHID service failures are classified by their error envelope", async () =>
     assert.deepEqual(result.body, {
       requestId: nagarikInput.requestId,
       source: "nagarik-app",
-      status: "failed",
-      error: {
-        code: item.code,
-        message: messages[item.code],
-        ...(item.issues ? { issues: item.issues } : {}),
-      },
+      status: false,
+      message: item.message,
+      code: item.code,
     });
-    // No upstream text crosses the boundary.
-    assert.ok(!JSON.stringify(result.body).includes(item.message.slice(0, 20)));
   }
 });
 
@@ -505,4 +481,173 @@ test("OpenHIM registration keeps authorization on the channel and uses one valid
   assert.deepEqual(channels[0].allow, ["national-app-clients"]);
   assert.equal(channels[0].requestBody, true);
   assert.equal(channels[0].timeout, 6000);
+});
+
+test("Nagarik mapping errors name each field and its rule without echoing values", async () => {
+  const { email: _email, ...citizen } = nagarikInput.citizen;
+  const result = await execute(
+    nagarikIntegration(),
+    {
+      ...nagarikInput,
+      citizen: {
+        ...citizen,
+        mobile: "98-5550-111",
+        nationalId: undefined,
+        extra: "x",
+      },
+    },
+    context,
+    async () => assert.fail("validator must not be called"),
+  );
+
+  assert.equal(result.status, 400);
+  const body = result.body as {
+    message: string;
+    field: string;
+    path: unknown;
+    issues: Array<Record<string, unknown>>;
+  };
+  assert.equal(body.field, "citizen.nationalId");
+  assert.deepEqual(body.path, ["citizen", "nationalId"]);
+  assert.match(
+    body.message,
+    /^citizen\.nationalId is required; citizen\.mobile/,
+  );
+  assert.deepEqual(
+    body.issues.map(({ field, message }) => ({ field, message })),
+    [
+      {
+        field: "citizen.nationalId",
+        message: "citizen.nationalId is required",
+      },
+      {
+        field: "citizen.mobile",
+        message:
+          "citizen.mobile must be +977 followed by 10 digits, for example +9779801234567",
+      },
+      { field: "citizen", message: "citizen has unknown field(s): extra" },
+    ],
+  );
+  assert.ok(!JSON.stringify(result.body).includes("5550"));
+});
+
+test("Nagarik validation errors name the submitted field", async () => {
+  // Without a citizenship number the health insurance identifier moves to index 1.
+  const { citizenshipNumber: _citizenship, ...citizen } = nagarikInput.citizen;
+  const unknownCode = "Unknown code '999' in the CodeSystem";
+  const result = await execute(
+    nagarikIntegration(),
+    { ...nagarikInput, citizen },
+    context,
+    async () =>
+      reply({
+        resourceType: "OperationOutcome",
+        issue: [
+          {
+            severity: "error",
+            code: "structure",
+            details: {
+              text: "Slice 'Patient.identifier:healthId': a matching slice is required, but not found (from np-core-patient)",
+            },
+            expression: ["Patient"],
+          },
+          {
+            severity: "error",
+            code: "code-invalid",
+            details: { text: unknownCode },
+            expression: [
+              "Patient.address[0].extension[1].value.ofType(Coding).code",
+            ],
+          },
+          {
+            // The real validator reports the same bad code again one level up.
+            severity: "error",
+            code: "code-invalid",
+            details: { text: "The Coding provided was not found" },
+            expression: [
+              "Patient.address[0].extension[1].value.ofType(Coding)",
+            ],
+          },
+          {
+            severity: "error",
+            code: "value",
+            details: { text: "Bad identifier" },
+            expression: ["Patient.identifier[1].value"],
+          },
+          {
+            severity: "error",
+            code: "invariant",
+            details: { text: "Profile rule failed" },
+            expression: ["Patient"],
+          },
+          {
+            severity: "warning",
+            code: "invariant",
+            details: { text: "Best practice warning" },
+            expression: ["Patient"],
+          },
+        ],
+      }),
+  );
+
+  assert.equal(result.status, 422);
+  assert.deepEqual(result.body, {
+    requestId: nagarikInput.requestId,
+    source: "nagarik-app",
+    status: false,
+    message:
+      "citizen.permanentAddress.districtCode is not a valid NP Core code; " +
+      "citizen.healthInsuranceNumber failed NP Core validation; " +
+      "Profile rule failed",
+    code: "fhir_validation_failed",
+    field: "citizen.permanentAddress.districtCode",
+    path: ["citizen", "permanentAddress", "districtCode"],
+    issues: [
+      {
+        severity: "error",
+        code: "code-invalid",
+        expression: "Patient.address[0].extension[1].value.ofType(Coding).code",
+        field: "citizen.permanentAddress.districtCode",
+        path: ["citizen", "permanentAddress", "districtCode"],
+        message:
+          "citizen.permanentAddress.districtCode is not a valid NP Core code",
+        detail: unknownCode,
+      },
+      {
+        severity: "error",
+        code: "value",
+        expression: "Patient.identifier[1].value",
+        field: "citizen.healthInsuranceNumber",
+        path: ["citizen", "healthInsuranceNumber"],
+        message: "citizen.healthInsuranceNumber failed NP Core validation",
+        detail: "Bad identifier",
+      },
+      {
+        severity: "error",
+        code: "invariant",
+        expression: "Patient",
+        message: "Profile rule failed",
+      },
+    ],
+  });
+});
+
+test("OpenHIM channel timeout covers validation and NHID generation", () => {
+  const [channel] = mediatorDefinition(
+    parseConfig({ OPENHIM_REGISTER: "false" }),
+    [nagarikIntegration()],
+  ).defaultChannelConfig;
+  assert.equal(channel.timeout, 7000);
+});
+
+test("Nagarik accepts Bikram Sambat days up to 32 and rejects impossible ones", () => {
+  const withBS = (dobBS: string) => ({
+    ...nagarikInput,
+    citizen: { ...nagarikInput.citizen, dobBS },
+  });
+  const toFhir = mappings["nagarik-app-registration-v1"].toFhir;
+  for (const dobBS of ["2047-02-32", "2047-03-31", "2047-12-30"])
+    assert.doesNotThrow(() => toFhir(withBS(dobBS), {}), dobBS);
+  for (const dobBS of ["2047-02-33", "2047-13-01", "2047-00-10", "2047-2-1"])
+    assert.throws(() => toFhir(withBS(dobBS), {}), dobBS);
 });
