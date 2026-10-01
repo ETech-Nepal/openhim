@@ -1,0 +1,8 @@
+[
+  {
+    "id": "nagarik-app-registration-v1",
+    "config": "apps/nagarik-registration.v1.json"
+  },
+  { "id": "normal-mapper-v1", "config": "apps/normal-mapper.v1.json" },
+  { "id": "emr-mapper-v1", "config": "apps/emr-mapper.v1.json" }
+]

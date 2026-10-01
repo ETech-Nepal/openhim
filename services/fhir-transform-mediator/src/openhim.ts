@@ -7,19 +7,16 @@ import {
   registerMediator,
   deactivateHeartbeat,
 } from "openhim-mediator-utils";
-import type { Config, Integration } from "./config.js";
+import type { AppDefinition, Config } from "./config.js";
 
-export function mediatorDefinition(
-  config: Config,
-  integrations: Integration[],
-) {
-  const channels = integrations.map((integration) => ({
-    name: `FHIR Middleware: ${integration.id}`,
-    urlPattern: `^${integration.channelPath}/?$`,
+export function mediatorDefinition(config: Config, apps: AppDefinition[]) {
+  const channels = apps.map((app) => ({
+    name: `FHIR Middleware: ${app.id}`,
+    urlPattern: `^${app.route}/?$`,
     type: "http",
     status: "enabled",
     methods: ["POST"],
-    allow: [integration.role],
+    allow: [app.role],
     routes: [
       {
         name: "FHIR Transform route",
@@ -33,11 +30,8 @@ export function mediatorDefinition(
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",
-    // The mediator calls the validator, then the NHID generator, one after the other.
-    timeout:
-      (integration.validation?.timeoutMs ?? 0) +
-      (integration.nhidGenerator?.timeoutMs ?? 0) +
-      5000,
+    // Validation, then only the dispatch acceptance; downstream processing is not awaited.
+    timeout: app.validation.timeoutMs + (app.delivery?.timeoutMs ?? 0) + 5000,
     properties: [],
     txViewAcl: [],
     txViewFullAcl: [],
@@ -46,24 +40,22 @@ export function mediatorDefinition(
     urn: config.MEDIATOR_URN,
     version: "0.1.0",
     name: "FHIR Middleware",
-    description: "Nagarik registration and EMR FHIR validation middleware",
+    description:
+      "Configuration-driven FHIR transform and validation middleware",
     defaultChannelConfig: channels,
-    endpoints: integrations.map((integration) => ({
+    endpoints: apps.map((app) => ({
       name: "Middleware endpoint",
       host: config.MEDIATOR_ROUTE_HOST,
       port: config.MEDIATOR_PORT,
-      path: integration.channelPath,
+      path: app.route,
       primary: true,
       type: "http",
     })),
   };
 }
 
-export async function registerOpenHim(
-  config: Config,
-  integrations: Integration[],
-) {
-  const definition = mediatorDefinition(config, integrations);
+export async function registerOpenHim(config: Config, apps: AppDefinition[]) {
+  const definition = mediatorDefinition(config, apps);
   const options = {
     apiURL: config.OPENHIM_API_URL,
     username: config.OPENHIM_USERNAME,

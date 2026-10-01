@@ -1,0 +1,28 @@
+{
+  "id": "encounter.r4.v1",
+  "resourceType": "Encounter",
+  "fields": {
+    "encounter_id": "required",
+    "encounter_identifier_system": "required",
+    "status": "required",
+    "class_code": "required",
+    "start": "required",
+    "subject_reference": "required"
+  },
+  "template": {
+    "resourceType": "Encounter",
+    "identifier": [
+      {
+        "system": { "$field": "encounter_identifier_system" },
+        "value": { "$field": "encounter_id" }
+      }
+    ],
+    "status": { "$field": "status" },
+    "class": {
+      "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+      "code": { "$field": "class_code" }
+    },
+    "subject": { "reference": { "$field": "subject_reference" } },
+    "period": { "start": { "$field": "start" } }
+  }
+}

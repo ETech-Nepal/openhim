@@ -1,24 +1,19 @@
 import express, { type ErrorRequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
-import type { Config, Integration } from "./config.js";
+import type { AppDefinition, Config } from "./config.js";
 import { execute, failure, type Context, type Result } from "./execute.js";
 import type { Transport } from "./http.js";
 
 export function createApp(
   config: Config,
-  integrations: Integration[],
+  apps: AppDefinition[],
   transport?: Transport,
 ) {
   const app = express();
   app.disable("x-powered-by");
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-  function send(
-    res: Response,
-    result: Result,
-    integration?: Integration,
-    contentType = "application/json",
-  ) {
+  function send(res: Response, result: Result, definition?: AppDefinition) {
     const context: Context = res.locals.context;
     return res
       .status(result.status)
@@ -30,7 +25,7 @@ export function createApp(
         response: {
           status: result.status,
           headers: {
-            "Content-Type": contentType,
+            "Content-Type": "application/json",
             "X-Correlation-ID": context.correlationId,
           },
           body: JSON.stringify(result.body),
@@ -39,9 +34,11 @@ export function createApp(
         orchestrations: result.orchestrations,
         properties: {
           correlationId: context.correlationId,
-          ...(integration && {
-            integration: integration.id,
-            mapping: integration.mapping,
+          ...(definition && {
+            integration: definition.id,
+            mapping: definition.resources
+              .map((resource) => resource.mapping.id)
+              .join(","),
           }),
         },
       });
@@ -54,25 +51,29 @@ export function createApp(
     next();
   });
 
-  // Check the integration and trusted client before parsing patient data.
+  // Check the app and content type before parsing patient data.
   app.use(
-    [...integrations.map((item) => item.channelPath)],
+    apps.map((item) => item.route),
     (req, res, next) => {
       const context: Context = res.locals.context;
-      const integration = integrations.find(
-        (item) => item.channelPath === req.baseUrl,
-      );
-      if (!integration)
+      const definition = apps.find((item) => item.route === req.baseUrl);
+      if (!definition)
         return send(
           res,
           failure(404, "unknown_integration", context, "routing"),
         );
-      res.locals.integration = integration;
+      res.locals.app = definition;
       if (!req.is(["application/json", "application/fhir+json"]))
         return send(
           res,
-          failure(415, "unsupported_content_type", context, "input"),
-          integration,
+          failure(
+            415,
+            "unsupported_content_type",
+            context,
+            "input",
+            definition,
+          ),
+          definition,
         );
       next();
     },
@@ -85,11 +86,11 @@ export function createApp(
     }),
   );
 
-  for (const configured of integrations)
-    app.post(configured.channelPath, (req, res, next) => {
-      const integration: Integration = res.locals.integration;
-      execute(integration, req.body, res.locals.context, transport)
-        .then((result) => send(res, result, integration))
+  for (const configured of apps)
+    app.post(configured.route, (req, res, next) => {
+      const definition: AppDefinition = res.locals.app;
+      execute(definition, req.body, res.locals.context, transport)
+        .then((result) => send(res, result, definition))
         .catch(next);
     });
 
@@ -105,6 +106,7 @@ export function createApp(
           : error?.type === "entity.parse.failed"
             ? 400
             : 500;
+    const definition: AppDefinition | undefined = res.locals.app;
     send(
       res,
       failure(
@@ -112,7 +114,9 @@ export function createApp(
         status === 500 ? "internal_error" : "invalid_request_body",
         res.locals.context,
         "input",
+        definition,
       ),
+      definition,
     );
   };
   app.use(errors);

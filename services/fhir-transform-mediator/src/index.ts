@@ -1,20 +1,17 @@
 import "dotenv/config";
-import { readFile } from "node:fs/promises";
 import { createApp } from "./app.js";
-import { parseConfig, parseIntegrations } from "./config.js";
+import { loadCatalog, parseConfig } from "./config.js";
 import { registerOpenHim } from "./openhim.js";
 
 async function start() {
   const config = parseConfig(process.env);
-  const integrations = parseIntegrations(
-    JSON.parse(await readFile(config.INTEGRATIONS_FILE, "utf8")),
-    process.env,
-  );
+  // An invalid catalog throws here, before any OpenHIM registration or listening.
+  const { apps } = loadCatalog(config, process.env);
   // Fail startup if configured registration fails; avoid advertising an unregistered service.
   const stopHeartbeat = config.OPENHIM_REGISTER
-    ? await registerOpenHim(config, integrations)
+    ? await registerOpenHim(config, apps)
     : () => {};
-  const server = createApp(config, integrations).listen(
+  const server = createApp(config, apps).listen(
     config.MEDIATOR_PORT,
     "0.0.0.0",
     () => {

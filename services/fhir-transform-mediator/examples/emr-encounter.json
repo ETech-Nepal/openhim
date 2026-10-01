@@ -1,0 +1,19 @@
+{
+  "patients": [
+    {
+      "national_id": "00123",
+      "first_name": "Ram",
+      "last_name": "Shrestha",
+      "sex": "M",
+      "dob": "1990-05-15"
+    }
+  ],
+  "encounters": [
+    {
+      "id": "0007",
+      "status": "finished",
+      "class": "AMB",
+      "start": "2026-09-14T10:00:00+05:45"
+    }
+  ]
+}

@@ -1,0 +1,201 @@
+{
+  "id": "patient.np-core.v1",
+  "resourceType": "Patient",
+  "fields": {
+    "national_id": "required",
+    "citizenship_number": "optional",
+    "health_insurance_number": "optional",
+    "given_name": "required",
+    "family_name": "required",
+    "given_name_ne": "optional",
+    "family_name_ne": "optional",
+    "gender": "required",
+    "birth_date": "required",
+    "birth_date_bs": "optional",
+    "caste_ethnicity_code": "optional",
+    "mobile": "optional",
+    "email": "optional",
+    "province_code": "optional",
+    "district_code": "optional",
+    "local_level_code": "optional",
+    "ward_no": "optional",
+    "tole": "optional",
+    "postal_code": "optional"
+  },
+  "template": {
+    "resourceType": "Patient",
+    "meta": {
+      "profile": [
+        "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient"
+      ]
+    },
+    "active": true,
+    "identifier": [
+      {
+        "use": "official",
+        "type": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+              "code": "NI",
+              "display": "National unique individual identifier"
+            }
+          ]
+        },
+        "system": "http://donidcr.gov.np",
+        "value": { "$field": "national_id" }
+      },
+      {
+        "$if": "citizenship_number",
+        "then": {
+          "use": "official",
+          "type": {
+            "coding": [
+              {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/np-core-identifier-type",
+                "code": "citizenship-number",
+                "display": "Nepal Citizenship Certificate Number"
+              }
+            ]
+          },
+          "system": "http://moha.gov.np",
+          "value": { "$field": "citizenship_number" }
+        }
+      },
+      {
+        "$if": "health_insurance_number",
+        "then": {
+          "use": "official",
+          "type": {
+            "coding": [
+              {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/np-core-identifier-type",
+                "code": "health-insurance-id",
+                "display": "Nepal Health Insurance ID"
+              }
+            ]
+          },
+          "system": "http://hib.gov.np",
+          "value": { "$field": "health_insurance_number" }
+        }
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": { "$field": "family_name" },
+        "given": [{ "$field": "given_name" }]
+      },
+      {
+        "$if": ["given_name_ne", "family_name_ne"],
+        "then": {
+          "use": "official",
+          "family": { "$field": "family_name_ne" },
+          "given": [{ "$field": "given_name_ne" }]
+        }
+      }
+    ],
+    "gender": {
+      "$lookup": "gender",
+      "map": {
+        "M": "male",
+        "F": "female",
+        "O": "other",
+        "U": "unknown",
+        "male": "male",
+        "female": "female",
+        "other": "other",
+        "unknown": "unknown"
+      }
+    },
+    "birthDate": { "$field": "birth_date" },
+    "_birthDate": {
+      "$if": "birth_date_bs",
+      "then": {
+        "extension": [
+          {
+            "url": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-bikram-sambat-date",
+            "valueString": { "$field": "birth_date_bs" }
+          }
+        ]
+      }
+    },
+    "extension": {
+      "$if": "caste_ethnicity_code",
+      "then": [
+        {
+          "url": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/caste-ethnicity",
+          "valueCoding": {
+            "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/nepal-caste-ethnicity",
+            "code": { "$field": "caste_ethnicity_code" }
+          }
+        }
+      ]
+    },
+    "telecom": {
+      "$if": ["mobile", "email"],
+      "then": [
+        {
+          "$if": "mobile",
+          "then": {
+            "system": "phone",
+            "value": { "$field": "mobile" },
+            "use": "mobile"
+          }
+        },
+        {
+          "$if": "email",
+          "then": { "system": "email", "value": { "$field": "email" } }
+        }
+      ]
+    },
+    "address": {
+      "$if": [
+        "province_code",
+        "district_code",
+        "local_level_code",
+        "ward_no",
+        "tole",
+        "postal_code"
+      ],
+      "then": [
+        {
+          "use": "home",
+          "type": "physical",
+          "line": [
+            { "$format": "Ward {ward_no}" },
+            { "$if": "tole", "then": { "$field": "tole" } }
+          ],
+          "postalCode": {
+            "$if": "postal_code",
+            "then": { "$field": "postal_code" }
+          },
+          "country": "NP",
+          "extension": [
+            {
+              "url": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/ext-nepal-province",
+              "valueCoding": {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/nepal-administrative-location",
+                "code": { "$field": "province_code" }
+              }
+            },
+            {
+              "url": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/ext-nepal-district",
+              "valueCoding": {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/nepal-administrative-location",
+                "code": { "$field": "district_code" }
+              }
+            },
+            {
+              "url": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/ext-nepal-local-level",
+              "valueCoding": {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/nepal-administrative-location",
+                "code": { "$field": "local_level_code" }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

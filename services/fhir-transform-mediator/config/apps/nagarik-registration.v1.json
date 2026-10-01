@@ -1,0 +1,177 @@
+{
+  "route": "/nagarik/registration",
+  "role": "national-app-clients",
+  "input": {
+    "strict": true,
+    "fields": {
+      "request_id": {
+        "path": "$.requestId",
+        "required": true,
+        "echo": true,
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "source": {
+        "path": "$.source",
+        "required": true,
+        "enum": ["nagarik-app"],
+        "rule": "must be \"nagarik-app\""
+      },
+      "national_id": {
+        "path": "$.citizen.nationalId",
+        "required": true,
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "citizenship_number": {
+        "path": "$.citizen.citizenshipNumber",
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "health_insurance_number": {
+        "path": "$.citizen.healthInsuranceNumber",
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "given_name": {
+        "path": "$.citizen.nameEn.given",
+        "required": true,
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "family_name": {
+        "path": "$.citizen.nameEn.family",
+        "required": true,
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "given_name_ne": {
+        "path": "$.citizen.nameNe.given",
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "family_name_ne": {
+        "path": "$.citizen.nameNe.family",
+        "maxLength": 100,
+        "rule": "must be 1-100 characters"
+      },
+      "gender": {
+        "path": "$.citizen.gender",
+        "required": true,
+        "enum": ["M", "F", "O", "U"],
+        "rule": "must be one of M, F, O, U"
+      },
+      "birth_date_bs": {
+        "path": "$.citizen.dobBS",
+        "pattern": "\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[0-2])",
+        "rule": "must be a BS date in YYYY-MM-DD format (month 01-12, day 01-32)"
+      },
+      "birth_date": {
+        "path": "$.citizen.dobAD",
+        "required": true,
+        "format": "date",
+        "rule": "must be a valid AD date in YYYY-MM-DD format"
+      },
+      "caste_ethnicity_code": {
+        "path": "$.citizen.casteEthnicityCode",
+        "enum": ["1", "2", "3", "4", "5", "6"],
+        "rule": "must be one of \"1\" to \"6\""
+      },
+      "mobile": {
+        "path": "$.citizen.mobile",
+        "pattern": "\\+977\\d{10}",
+        "rule": "must be +977 followed by 10 digits, for example +9779801234567"
+      },
+      "email": {
+        "path": "$.citizen.email",
+        "format": "email",
+        "maxLength": 254,
+        "rule": "must be a valid email address of at most 254 characters"
+      },
+      "province_code": {
+        "path": "$.citizen.permanentAddress.provinceCode",
+        "pattern": "\\d{1,2}",
+        "rule": "must be 1-2 digits"
+      },
+      "district_code": {
+        "path": "$.citizen.permanentAddress.districtCode",
+        "pattern": "\\d{3}",
+        "rule": "must be 3 digits"
+      },
+      "local_level_code": {
+        "path": "$.citizen.permanentAddress.localLevelCode",
+        "pattern": "\\d{5}",
+        "rule": "must be 5 digits"
+      },
+      "ward_no": {
+        "path": "$.citizen.permanentAddress.wardNo",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 99,
+        "rule": "must be a whole number from 1 to 99"
+      },
+      "tole": {
+        "path": "$.citizen.permanentAddress.tole",
+        "maxLength": 200,
+        "rule": "must be 1-200 characters"
+      },
+      "postal_code": {
+        "path": "$.citizen.permanentAddress.postalCode",
+        "maxLength": 20,
+        "rule": "must be 1-20 characters"
+      }
+    }
+  },
+  "resources": [{ "key": "patient", "mapping": "patient.np-core.v1" }],
+  "validation": {
+    "channel": "validator",
+    "profile": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient",
+    "ignore": [
+      "Slice 'Patient.identifier:healthId': a matching slice is required, but not found"
+    ],
+    "messages": {
+      "code-invalid": "is not a valid NP Core code",
+      "required": "is required by NP Core",
+      "default": "failed NP Core validation"
+    }
+  },
+  "delivery": {
+    "channel": "nhid-registration",
+    "successStatuses": [200, 201, 202],
+    "relayErrors": true
+  },
+  "errors": {
+    "messages": {
+      "request_mapping_failed": "The submitted registration data is invalid.",
+      "fhir_validation_failed": "The submitted citizen data failed validation.",
+      "validator_failed": "The validation service could not validate the citizen data.",
+      "upstream_timeout": "The validation service did not respond in time.",
+      "upstream_unavailable": "The validation service is unavailable.",
+      "dispatch_failed": "Your registration could not be submitted right now. Please try again later.",
+      "dispatch_timeout": "Your registration is taking longer than expected and may still be processed. Please do not submit it again yet.",
+      "unsupported_content_type": "The request must be JSON.",
+      "invalid_request_body": "The request body is not valid JSON or is too large."
+    },
+    "template": {
+      "requestId": { "$if": "request_id", "then": { "$field": "request_id" } },
+      "source": "nagarik-app",
+      "status": false,
+      "message": { "$field": "error.message" },
+      "code": { "$field": "error.code" },
+      "field": { "$if": "error.field", "then": { "$field": "error.field" } },
+      "path": { "$if": "error.path", "then": { "$field": "error.path" } },
+      "issues": { "$if": "error.issues", "then": { "$field": "error.issues" } }
+    }
+  },
+  "acknowledgement": {
+    "message": "Your registration has been received and is being processed.",
+    "template": {
+      "requestId": { "$if": "request_id", "then": { "$field": "request_id" } },
+      "source": "nagarik-app",
+      "status": true,
+      "code": { "$field": "ack.status" },
+      "message": { "$field": "ack.message" },
+      "correlationId": { "$field": "ack.correlation_id" }
+    }
+  }
+}

@@ -1,3 +1,5 @@
+import http from "node:http";
+import https from "node:https";
 import axios from "axios";
 
 export type JsonRequest = {
@@ -10,13 +12,37 @@ export type JsonRequest = {
 export type JsonResponse = { status: number; body: unknown };
 export type Transport = (request: JsonRequest) => Promise<JsonResponse>;
 
+// `timeout` means the server may have received the request: it timed out after the
+// connection (and TLS handshake) was up. A DNS failure, refused or slow connection
+// never reached the server, so it is a plain failure.
 export class TransportError extends Error {
   constructor(readonly timeout: boolean) {
     super(timeout ? "External request timed out" : "External request failed");
   }
 }
 
+// Fresh agents per request so a socket's readiness belongs to this request only.
+function connectionAgents(onReady: () => void) {
+  const httpAgent = new http.Agent();
+  const httpsAgent = new https.Agent();
+  const track = (agent: http.Agent, event: string) => {
+    const create = agent.createConnection.bind(agent);
+    agent.createConnection = (options, callback) => {
+      const socket = create(options, callback);
+      socket?.once(event, onReady);
+      return socket;
+    };
+  };
+  track(httpAgent, "connect");
+  track(httpsAgent, "secureConnect");
+  return { httpAgent, httpsAgent };
+}
+
 export const postJson: Transport = async (request) => {
+  let connected = false;
+  const agents = connectionAgents(() => {
+    connected = true;
+  });
   try {
     const response = await axios.request<string>({
       method: request.method ?? "POST",
@@ -37,6 +63,7 @@ export const postJson: Transport = async (request) => {
       validateStatus: () => true,
       // Explicit endpoints must not inherit a process-wide forward proxy.
       proxy: false,
+      ...agents,
     });
     let body: unknown;
     try {
@@ -47,7 +74,8 @@ export const postJson: Transport = async (request) => {
     return { status: response.status, body };
   } catch (error) {
     throw new TransportError(
-      axios.isAxiosError(error) &&
+      connected &&
+        axios.isAxiosError(error) &&
         ["ECONNABORTED", "ETIMEDOUT", "ERR_CANCELED"].includes(
           error.code ?? "",
         ),

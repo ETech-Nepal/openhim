@@ -1,0 +1,100 @@
+{
+  "route": "/emr/encounter",
+  "role": "emr-clients",
+  "input": {
+    "strict": false,
+    "fields": {
+      "national_id": {
+        "path": "$.patients[0].national_id",
+        "required": true,
+        "maxLength": 100
+      },
+      "given_name": {
+        "path": "$.patients[0].first_name",
+        "required": true,
+        "maxLength": 100
+      },
+      "family_name": {
+        "path": "$.patients[0].last_name",
+        "required": true,
+        "maxLength": 100
+      },
+      "gender": {
+        "path": "$.patients[0].sex",
+        "required": true,
+        "enum": ["M", "F", "O", "U"],
+        "rule": "must be one of M, F, O, U"
+      },
+      "birth_date": {
+        "path": "$.patients[0].dob",
+        "required": true,
+        "format": "date",
+        "rule": "must be a date in YYYY-MM-DD format"
+      },
+      "encounter_identifier_system": {
+        "value": "http://emr.hie.local/encounter-id"
+      },
+      "encounter_id": {
+        "path": "$.encounters[0].id",
+        "required": true,
+        "maxLength": 100
+      },
+      "status": {
+        "path": "$.encounters[0].status",
+        "required": true,
+        "enum": [
+          "planned",
+          "arrived",
+          "triaged",
+          "in-progress",
+          "onleave",
+          "finished",
+          "cancelled",
+          "entered-in-error",
+          "unknown"
+        ]
+      },
+      "class_code": {
+        "path": "$.encounters[0].class",
+        "required": true,
+        "enum": [
+          "AMB",
+          "EMER",
+          "IMP",
+          "ACUTE",
+          "NONAC",
+          "OBSENC",
+          "PRENC",
+          "SS",
+          "VR",
+          "HH"
+        ]
+      },
+      "start": {
+        "path": "$.encounters[0].start",
+        "required": true,
+        "pattern": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})",
+        "rule": "must be an ISO date-time with a time zone"
+      }
+    }
+  },
+  "resources": [
+    { "key": "patient", "mapping": "patient.np-core.v1" },
+    {
+      "key": "encounter",
+      "mapping": "encounter.r4.v1",
+      "refs": { "subject_reference": "patient" }
+    }
+  ],
+  "bundleType": "transaction",
+  "validation": {
+    "channel": "validator",
+    "ignore": [
+      "Slice 'Patient.identifier:healthId': a matching slice is required, but not found"
+    ]
+  },
+  "delivery": { "channel": "hapi-fhir", "successStatuses": [200, 201] },
+  "acknowledgement": {
+    "message": "The patient and encounter have been received and are being processed."
+  }
+}

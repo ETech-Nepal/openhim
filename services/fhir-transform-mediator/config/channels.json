@@ -1,0 +1,12 @@
+{
+  "validator": { "urlEnv": "VALIDATOR_URL", "timeoutMs": 15000 },
+  "nhid-registration": {
+    "urlEnv": "NHID_REGISTRATION_URL",
+    "timeoutMs": 10000
+  },
+  "hapi-fhir": {
+    "urlEnv": "HAPI_FHIR_CHANNEL_URL",
+    "authorizationEnv": "HAPI_FHIR_CHANNEL_AUTHORIZATION",
+    "timeoutMs": 15000
+  }
+}

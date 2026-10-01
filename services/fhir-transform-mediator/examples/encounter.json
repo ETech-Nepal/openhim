@@ -1,7 +1,0 @@
-{
-  "encounterId": "0007",
-  "patientReference": "Patient/patient-1",
-  "status": "finished",
-  "classCode": "AMB",
-  "start": "2026-09-14T10:00:00+05:45"
-}
