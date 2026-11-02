@@ -1,0 +1,99 @@
+{
+  "id": "patient.cdrs.v1",
+  "resourceType": "Patient",
+  "fields": {
+    "caller_facility": "required",
+    "hospital_patient_number": "required",
+    "imis_id": "optional",
+    "given_name": "optional",
+    "family_name": "optional",
+    "gender": "required",
+    "birth_date": "optional",
+    "phone_number": "optional"
+  },
+  "template": {
+    "resourceType": "Patient",
+    "meta": {
+      "profile": [
+        "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient"
+      ]
+    },
+    "identifier": [
+      {
+        "use": "usual",
+        "type": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+              "code": "MR"
+            }
+          ]
+        },
+        "system": {
+          "$format": "http://mohp.gov.np/fhir/NamingSystem/hospital-mrn/{caller_facility}"
+        },
+        "value": {
+          "$field": "hospital_patient_number"
+        }
+      },
+      {
+        "$if": "imis_id",
+        "then": {
+          "use": "official",
+          "type": {
+            "coding": [
+              {
+                "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/np-core-identifier-type",
+                "code": "health-insurance-id"
+              }
+            ]
+          },
+          "system": "http://hib.gov.np",
+          "value": {
+            "$field": "imis_id"
+          }
+        }
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": {
+          "$if": "family_name",
+          "then": {
+            "$field": "family_name"
+          }
+        },
+        "given": {
+          "$if": "given_name",
+          "then": [
+            {
+              "$field": "given_name"
+            }
+          ]
+        }
+      }
+    ],
+    "gender": {
+      "$field": "gender"
+    },
+    "birthDate": {
+      "$if": "birth_date",
+      "then": {
+        "$field": "birth_date"
+      }
+    },
+    "telecom": [
+      {
+        "$if": "phone_number",
+        "then": {
+          "system": "phone",
+          "value": {
+            "$field": "phone_number"
+          },
+          "use": "mobile"
+        }
+      }
+    ]
+  }
+}

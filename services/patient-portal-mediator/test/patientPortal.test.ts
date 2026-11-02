@@ -2,15 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
 
-Object.assign(process.env, {
-  DOTENV_CONFIG_PATH: '/dev/null', NODE_ENV: 'test',
-  MEDIATOR_URN: 'urn:test:portal', OPENHIM_API_URL: 'http://openhim.invalid',
-  OPENHIM_USERNAME: 'test', OPENHIM_PASSWORD: 'test',
-  HAPI_FHIR_BASE_URL: 'http://hapi.invalid',
-  PORTAL_PATIENT_SHARED_SECRET: 'synthetic-test-secret-at-least-32-bytes',
-  PORTAL_PATIENT_TOKEN_ISSUER: 'urn:test:issuer', PORTAL_GID_CLAIM: 'gid',
-});
-delete process.env.PORTAL_PATIENT_JWKS_URL;
+await import('./fixtures/env.js');
 
 const { patientContext } = await import('../src/middleware/patientContext.js');
 const { portalSummaryHandler } = await import('../src/handlers/patientPortal.js');
@@ -46,6 +38,8 @@ test('summary scopes all clinical reads to the signed identity despite forged re
   t.after(() => { hapi.defaults.adapter = previous; });
   hapi.defaults.adapter = async config => {
     calls.push({ url: config.url, params: config.params });
+    assert.equal(config.headers.Authorization, 'DPoP synthetic-service-token');
+    assert.ok(config.headers.DPoP);
     let resources = [];
     if (config.url === '/Patient') {
       assert.equal(config.params.identifier, `${SYS.JEMPI_GOLDEN_UID}|0x1`);

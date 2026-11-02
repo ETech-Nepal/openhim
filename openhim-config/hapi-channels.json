@@ -1,105 +1,68 @@
 [
   {
+    "name": "NP FHIR read",
     "type": "http",
     "status": "enabled",
     "authType": "private",
     "requestBody": true,
     "responseBody": true,
-    "name": "FHIR metadata",
-    "urlPattern": "^/fhir/metadata$",
-    "methods": [
-      "GET"
-    ],
+    "priority": 2,
     "allow": [
-      "ehr",
-      "patient"
+      "hospital",
+      "laboratory"
     ],
     "routes": [
       {
-        "name": "hapi",
+        "name": "HAPI FHIR",
         "host": "fhir",
         "port": 8080,
         "primary": true,
         "type": "http",
-        "secured": false
-      }
-    ]
-  },
-  {
-    "type": "http",
-    "status": "enabled",
-    "authType": "private",
-    "requestBody": true,
-    "responseBody": true,
-    "name": "FHIR ehr create",
-    "methods": [
-      "POST"
-    ],
-    "allow": [
-      "ehr"
-    ],
-    "routes": [
-      {
-        "name": "hapi",
-        "host": "fhir",
-        "port": 8080,
-        "primary": true,
-        "type": "http",
-        "secured": false
+        "secured": false,
+        "forwardAuthHeader": true
       }
     ],
-    "urlPattern": "^/fhir/(Patient|Encounter|Observation|Condition|Procedure|DiagnosticReport)(/\\$validate)?$"
-  },
-  {
-    "type": "http",
-    "status": "enabled",
-    "authType": "private",
-    "requestBody": true,
-    "responseBody": true,
-    "name": "FHIR ehr read",
+    "properties": [],
+    "txViewAcl": [],
+    "txViewFullAcl": [],
     "methods": [
       "GET",
       "HEAD"
     ],
-    "allow": [
-      "ehr"
-    ],
-    "routes": [
-      {
-        "name": "hapi",
-        "host": "fhir",
-        "port": 8080,
-        "primary": true,
-        "type": "http",
-        "secured": false
-      }
-    ],
-    "urlPattern": "^/fhir/(Patient|Encounter|Observation|Condition|Procedure|DiagnosticReport)(/[^/]+)?(/\\$meta)?$"
+    "description": "Reads and searches, straight to HAPI. The HAPI access rules check the token's scopes and refuse searches that do not name one patient.",
+    "urlPattern": "^/fhir(/metadata|/[A-Z][A-Za-z]+(/[^/]+)?(/_history(/[^/]+)?)?)?/?$"
   },
   {
+    "name": "NP FHIR write",
     "type": "http",
     "status": "enabled",
     "authType": "private",
     "requestBody": true,
     "responseBody": true,
-    "name": "FHIR patient read",
-    "methods": [
-      "GET",
-      "HEAD"
-    ],
+    "priority": 2,
     "allow": [
-      "patient"
+      "hospital",
+      "laboratory"
     ],
     "routes": [
       {
-        "name": "hapi",
+        "name": "HAPI FHIR",
         "host": "fhir",
         "port": 8080,
         "primary": true,
         "type": "http",
-        "secured": false
+        "secured": false,
+        "forwardAuthHeader": true
       }
     ],
-    "urlPattern": "^/fhir/(Patient|Encounter|Observation)(/[^/]+)?(/\\$meta)?$"
+    "properties": [],
+    "txViewAcl": [],
+    "txViewFullAcl": [],
+    "methods": [
+      "POST",
+      "PUT"
+    ],
+    "description": "Single-resource writes, straight to HAPI. Patient writes (identity mediator) and Bundles (transform mediator) match their priority-1 channels first.",
+    "urlPattern": "^/fhir/[A-Z][A-Za-z]+(/[^/]+)?$"
   }
 ]

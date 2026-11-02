@@ -1,0 +1,142 @@
+{
+  "route": "/transform/cdrs",
+  "role": "hospital",
+  "auth": true,
+  "input": {
+    "strict": false,
+    "rows": {
+      "max": 100
+    },
+    "fields": {
+      "hospital_patient_number": {
+        "path": "$.hospital_patient_number",
+        "normalize": true,
+        "required": true,
+        "maxLength": 64
+      },
+      "encounter_number": {
+        "path": "$.encounter_number",
+        "normalize": true,
+        "required": true,
+        "maxLength": 64
+      },
+      "registration_number": {
+        "path": "$.registration_number",
+        "normalize": true,
+        "maxLength": 64
+      },
+      "imis_id": {
+        "path": "$.imis_id",
+        "normalize": true,
+        "absent": [
+          "0"
+        ],
+        "pattern": "(?!0{9}$)\\d{9}",
+        "rule": "must be 9 digits"
+      },
+      "given_name": {
+        "path": "$.first_name",
+        "normalize": true,
+        "maxLength": 100
+      },
+      "family_name": {
+        "path": "$.last_name",
+        "normalize": true,
+        "maxLength": 100
+      },
+      "gender": {
+        "path": "$.sex",
+        "normalize": true,
+        "required": true,
+        "case": "lower",
+        "enum": [
+          "male",
+          "female",
+          "other",
+          "unknown"
+        ],
+        "rule": "must be one of Male, Female, Other, Unknown"
+      },
+      "birth_date": {
+        "path": "$.dob",
+        "normalize": true,
+        "format": "date",
+        "rule": "must be a date in YYYY-MM-DD format"
+      },
+      "phone_number": {
+        "path": "$.phone_number",
+        "normalize": true,
+        "pattern": "\\d{10}",
+        "rule": "must be 10 digits"
+      },
+      "department_type": {
+        "path": "$.department_type",
+        "normalize": true,
+        "required": true,
+        "enum": [
+          "C",
+          "E",
+          "N"
+        ],
+        "rule": "must be one of C, E, N"
+      },
+      "department_id": {
+        "path": "$.department_id",
+        "normalize": true,
+        "required": true,
+        "maxLength": 64
+      },
+      "department_name": {
+        "path": "$.department_name",
+        "normalize": true,
+        "required": true,
+        "maxLength": 200
+      },
+      "visit_start": {
+        "path": "$.visit_date_ad_time",
+        "normalize": true,
+        "required": true,
+        "format": "local-datetime",
+        "offset": "+05:45",
+        "rule": "must be a date-time in YYYY-MM-DD HH:MM:SS.fff format"
+      }
+    }
+  },
+  "resources": [
+    {
+      "key": "patient",
+      "mapping": "patient.cdrs.v1"
+    },
+    {
+      "key": "encounter",
+      "mapping": "encounter.cdrs.v1",
+      "refs": {
+        "subject_reference": "patient"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Encounter",
+        "ifNoneExist": "identifier=http://nhfr.digitalhealth.gov.np/{caller_facility}|{encounter_number}"
+      }
+    }
+  ],
+  "bundleType": "transaction",
+  "validation": {
+    "channel": "validator",
+    "ignore": [
+      "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+      "among choices: http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient,"
+    ]
+  },
+  "identity": {
+    "channel": "identity"
+  },
+  "delivery": {
+    "channel": "hapi",
+    "successStatuses": [
+      200
+    ],
+    "mode": "fhir",
+    "forwardToken": true
+  }
+}

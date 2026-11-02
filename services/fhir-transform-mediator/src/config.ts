@@ -41,6 +41,9 @@ export function parseConfig(env: Record<string, unknown>) {
         OPENHIM_USERNAME: z.string().default(""),
         OPENHIM_PASSWORD: z.string().default(""),
         OPENHIM_TRUST_SELF_SIGNED: boolean("false"),
+        // Verifies client tokens for apps with `auth: true` (forwarded by OpenHIM).
+        KEYCLOAK_ISSUER: z.string().url().optional(),
+        KEYCLOAK_JWKS_URI: httpUrl.optional(),
         MAX_BODY_BYTES: z.coerce
           .number()
           .int()
@@ -88,7 +91,17 @@ const inputFieldSchema = z
     echo: z.boolean().default(false),
     maxLength: z.number().int().min(1).optional(),
     pattern: z.string().min(1).optional(),
-    format: z.enum(["date", "email"]).optional(),
+    format: z.enum(["date", "email", "local-datetime"]).optional(),
+    // UTC offset added to a local-datetime ("YYYY-MM-DD HH:MM:SS[.fff]"), e.g. "+05:45".
+    offset: z
+      .string()
+      .regex(/^[+-]\d{2}:\d{2}$/)
+      .optional(),
+    // Source systems that export from SQL: numbers become text, surrounding blanks are
+    // trimmed, and empty text, "none" and the `absent` values count as not sent.
+    normalize: z.boolean().default(false),
+    absent: z.array(z.string()).default([]),
+    case: z.enum(["lower", "upper"]).optional(),
     enum: z.array(z.string()).min(1).optional(),
     minimum: z.number().int().optional(),
     maximum: z.number().int().optional(),
@@ -99,15 +112,38 @@ const inputFieldSchema = z
   .refine(
     (spec) => (spec.path === undefined) !== (spec.value === undefined),
     "Set exactly one of path or value",
+  )
+  .refine(
+    (spec) =>
+      (spec.format === "local-datetime") === (spec.offset !== undefined),
+    "local-datetime needs an offset, and only it takes one",
   );
+const requestSchema = z
+  .object({
+    method: z.enum(["POST", "PUT"]),
+    url: z.string().min(1),
+    // Conditional create, e.g. "identifier=http://nhfr.digitalhealth.gov.np/{caller_facility}|{encounter_number}".
+    ifNoneExist: z.string().min(1).optional(),
+  })
+  .strict();
 const appSchema = z
   .object({
     route: z.string().regex(/^\/[a-z0-9/-]*[a-z0-9]$/),
-    role: z.string().min(1),
+    role: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+    // Require the client's token (forwarded by OpenHIM) and expose the caller's facility
+    // to mappings as the field `caller_facility`.
+    auth: z.boolean().default(false),
     input: z
       .object({
+        // "fields": source JSON mapped by `resources`. "fhir": a FHIR Bundle, not mapped.
+        format: z.enum(["fields", "fhir"]).default("fields"),
         strict: z.boolean().default(false),
-        fields: z.record(fieldName, inputFieldSchema),
+        fields: z.record(fieldName, inputFieldSchema).default({}),
+        // Accept a JSON array of up to `max` records; each is processed on its own.
+        rows: z
+          .object({ max: z.number().int().min(1).max(500) })
+          .strict()
+          .optional(),
       })
       .strict(),
     resources: z
@@ -117,17 +153,11 @@ const appSchema = z
             key: id,
             mapping: z.string(),
             refs: z.record(fieldName, id).default({}),
-            request: z
-              .object({
-                method: z.enum(["POST", "PUT"]),
-                url: z.string().min(1),
-              })
-              .strict()
-              .optional(),
+            request: requestSchema.optional(),
           })
           .strict(),
       )
-      .min(1),
+      .default([]),
     bundleType: z.enum(["collection", "transaction"]).optional(),
     validation: z
       .object({
@@ -146,12 +176,21 @@ const appSchema = z
           .default({}),
       })
       .strict(),
+    // Patient resources are registered with this channel (the identity mediator) before
+    // delivery, with the client's own token; references to them are rewritten to the
+    // stored Patient and they are left out of the delivered Bundle.
+    identity: z.object({ channel: id }).strict().optional(),
     delivery: z
       .object({
         channel: id,
         successStatuses: z.array(z.number().int().min(200).max(299)).min(1),
         // Return a 4xx/5xx JSON error body from the channel to the caller as it is.
         relayErrors: z.boolean().default(false),
+        // "acknowledge": one-way hand-off, answer 202. "fhir": the channel is a FHIR server;
+        // wait for it and return its result.
+        mode: z.enum(["acknowledge", "fhir"]).default("acknowledge"),
+        // Send the client's own token instead of a configured Authorization.
+        forwardToken: z.boolean().default(false),
       })
       .strict()
       .optional(),
@@ -191,7 +230,69 @@ export const errorFields = [
   "error.issues",
 ];
 
+// Fields every authenticated app provides without configuration.
+export const callerFields = ["caller_facility"];
+
+const LOCAL_DATETIME =
+  /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/;
+
+// A wall-clock time that actually exists ("2026-02-30 25:00:00" does not), as ISO 8601.
+function localDatetime(offset: string) {
+  return z.string().transform((value, ctx) => {
+    const m = LOCAL_DATETIME.exec(value);
+    const ms = (m?.[7] ?? "0").padEnd(3, "0");
+    const parts = m?.slice(1, 7).map(Number);
+    const date =
+      parts &&
+      new Date(
+        Date.UTC(
+          parts[0],
+          parts[1] - 1,
+          parts[2],
+          parts[3],
+          parts[4],
+          parts[5],
+        ),
+      );
+    if (
+      !m ||
+      !date ||
+      date.getUTCFullYear() !== parts[0] ||
+      date.getUTCMonth() !== parts[1] - 1 ||
+      date.getUTCDate() !== parts[2] ||
+      date.getUTCHours() !== parts[3] ||
+      date.getUTCMinutes() !== parts[4] ||
+      date.getUTCSeconds() !== parts[5]
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom });
+      return z.NEVER;
+    }
+    return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}.${ms}${offset}`;
+  });
+}
+
+// The value a normalized field holds, or undefined when it counts as not sent.
+export function normalizeValue(
+  spec: { normalize: boolean; absent: string[]; case?: "lower" | "upper" },
+  value: unknown,
+) {
+  if (!spec.normalize) return value;
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "number" && Number.isFinite(value))
+    value = String(value);
+  if (typeof value !== "string") return value;
+  const text = value.trim();
+  if (!text || text.toLowerCase() === "none" || spec.absent.includes(text))
+    return undefined;
+  return spec.case === "lower"
+    ? text.toLowerCase()
+    : spec.case === "upper"
+      ? text.toUpperCase()
+      : text;
+}
+
 function inputValidator(spec: z.infer<typeof inputFieldSchema>) {
+  if (spec.format === "local-datetime") return localDatetime(spec.offset!);
   if (spec.type === "integer") {
     let schema = z.number().int();
     if (spec.minimum !== undefined) schema = schema.min(spec.minimum);
@@ -262,6 +363,28 @@ export function loadCatalog(
 
   const apps = registry.map(({ id, config: file }) => {
     const app = appSchema.parse(readJson(dir, file));
+    const fhir = app.input.format === "fhir";
+    if (
+      fhir &&
+      (app.resources.length ||
+        Object.keys(app.input.fields).length ||
+        app.input.rows)
+    )
+      throw new ConfigError(
+        `App ${id} with fhir input takes no fields, rows or resources`,
+      );
+    if (!fhir && !app.resources.length)
+      throw new ConfigError(`App ${id} needs resources`);
+    if ((app.identity || app.delivery?.forwardToken) && !app.auth)
+      throw new ConfigError(
+        `App ${id} forwards the client's token, so it needs auth`,
+      );
+    if (app.input.rows && app.delivery?.mode !== "fhir")
+      throw new ConfigError(`App ${id} rows need a fhir delivery`);
+    if (app.identity && app.delivery?.mode !== "fhir")
+      throw new ConfigError(`App ${id} identity needs a fhir delivery`);
+    if (fhir && app.delivery?.mode !== "fhir")
+      throw new ConfigError(`App ${id} fhir input needs a fhir delivery`);
     const fields = Object.entries(app.input.fields).map(([name, spec]) => {
       const segments: Segment[] =
         spec.path === undefined ? [] : parseSelector(spec.path);
@@ -273,13 +396,18 @@ export function loadCatalog(
         required: spec.required,
         echo: spec.echo,
         rule: spec.rule,
+        normalize: {
+          normalize: spec.normalize,
+          absent: spec.absent,
+          case: spec.case,
+        },
         schema: inputValidator(spec),
       };
     });
     const keys = new Set(app.resources.map((resource) => resource.key));
     if (keys.size !== app.resources.length)
       throw new ConfigError(`App ${id} has duplicate resource keys`);
-    if (app.resources.length > 1 !== (app.bundleType !== undefined))
+    if (!fhir && app.resources.length > 1 !== (app.bundleType !== undefined))
       throw new ConfigError(
         `App ${id} needs bundleType only for resources > 1`,
       );
@@ -301,9 +429,19 @@ export function loadCatalog(
         if (
           need === "required" &&
           !Object.hasOwn(app.input.fields, name) &&
-          !Object.hasOwn(resource.refs, name)
+          !Object.hasOwn(resource.refs, name) &&
+          !(app.auth && callerFields.includes(name))
         )
           throw new ConfigError(`App ${id} does not provide ${name}`);
+      if (resource.request?.ifNoneExist)
+        for (const [, name] of resource.request.ifNoneExist.matchAll(
+          /\{([a-z][a-z0-9_]*)\}/g,
+        ))
+          if (
+            !Object.hasOwn(app.input.fields, name) &&
+            !(app.auth && callerFields.includes(name))
+          )
+            throw new ConfigError(`App ${id} ifNoneExist uses unknown ${name}`);
       return { ...resource, mapping };
     });
     const echo = fields.filter((f) => f.echo).map((f) => f.name);
@@ -318,11 +456,15 @@ export function loadCatalog(
     return {
       id,
       route: app.route,
-      role: app.role,
+      roles: typeof app.role === "string" ? [app.role] : app.role,
+      auth: app.auth,
+      format: app.input.format,
+      rows: app.input.rows,
       strict: app.input.strict,
       fields,
       resources,
       bundleType: app.bundleType,
+      identity: app.identity && channel(app.identity.channel),
       validation: {
         ...channel(app.validation.channel),
         profile: app.validation.profile,
@@ -333,6 +475,8 @@ export function loadCatalog(
         ...channel(app.delivery.channel),
         successStatuses: app.delivery.successStatuses,
         relayErrors: app.delivery.relayErrors,
+        mode: app.delivery.mode,
+        forwardToken: app.delivery.forwardToken,
       },
       errors: app.errors,
       acknowledgement: app.acknowledgement,
@@ -342,6 +486,13 @@ export function loadCatalog(
     throw new ConfigError("Duplicate app ID");
   if (new Set(apps.map((app) => app.route)).size !== apps.length)
     throw new ConfigError("Duplicate app route");
+  if (
+    apps.some((app) => app.auth) &&
+    !(env.KEYCLOAK_ISSUER && env.KEYCLOAK_JWKS_URI)
+  )
+    throw new ConfigError(
+      "Apps with auth need KEYCLOAK_ISSUER and KEYCLOAK_JWKS_URI",
+    );
   return { apps };
 }
 export type Catalog = ReturnType<typeof loadCatalog>;

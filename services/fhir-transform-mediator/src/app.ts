@@ -2,12 +2,18 @@ import express, { type ErrorRequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import type { AppDefinition, Config } from "./config.js";
 import { execute, failure, type Context, type Result } from "./execute.js";
+import { executeFhir } from "./fhirDelivery.js";
 import type { Transport } from "./http.js";
+import { createTokenVerifier, type Verify } from "./auth.js";
 
 export function createApp(
   config: Config,
   apps: AppDefinition[],
   transport?: Transport,
+  verify: Verify | undefined = config.KEYCLOAK_ISSUER &&
+  config.KEYCLOAK_JWKS_URI
+    ? createTokenVerifier(config.KEYCLOAK_ISSUER, config.KEYCLOAK_JWKS_URI)
+    : undefined,
 ) {
   const app = express();
   app.disable("x-powered-by");
@@ -25,7 +31,7 @@ export function createApp(
         response: {
           status: result.status,
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type": result.contentType ?? "application/json",
             "X-Correlation-ID": context.correlationId,
           },
           body: JSON.stringify(result.body),
@@ -63,13 +69,37 @@ export function createApp(
           failure(404, "unknown_integration", context, "routing"),
         );
       res.locals.app = definition;
+      next();
+    },
+    // The client's token, verified before any patient data is read.
+    (req, res, next) => {
+      const context: Context = res.locals.context;
+      const definition: AppDefinition = res.locals.app;
+      if (!definition.auth) return next();
+      const fail = (status: number, error: string) =>
+        send(
+          res,
+          failure(status, error, context, "auth", definition),
+          definition,
+        );
+      if (!verify) return fail(500, "internal_error");
+      verify(req.get("Authorization"))
+        .then((caller) => {
+          if (!caller) return fail(401, "unauthorized");
+          context.caller = caller;
+          next();
+        })
+        .catch(() => fail(503, "auth_unavailable"));
+    },
+    (req, res, next) => {
+      const definition: AppDefinition = res.locals.app;
       if (!req.is(["application/json", "application/fhir+json"]))
         return send(
           res,
           failure(
             415,
             "unsupported_content_type",
-            context,
+            res.locals.context,
             "input",
             definition,
           ),
@@ -89,7 +119,12 @@ export function createApp(
   for (const configured of apps)
     app.post(configured.route, (req, res, next) => {
       const definition: AppDefinition = res.locals.app;
-      execute(definition, req.body, res.locals.context, transport)
+      (definition.delivery?.mode === "fhir" ? executeFhir : execute)(
+        definition,
+        req.body,
+        res.locals.context,
+        transport,
+      )
         .then((result) => send(res, result, definition))
         .catch(next);
     });

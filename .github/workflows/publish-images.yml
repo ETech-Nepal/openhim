@@ -17,14 +17,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: hapi-mediator
-            context: services/fhir-mediator
-          - image: fhir-intake-mediator
-            context: services/fhir-intake-mediator
+          - image: openhie-hapi
+            context: hapi-interceptors
+          - image: openhie-identity-mediator
+            context: services/identity-mediator
           - image: fhir-transform-mediator
             context: services/fhir-transform-mediator
-          - image: openhie-admin-mediator
-            context: services/admin-mediator
           - image: openhie-patient-portal-mediator
             context: services/patient-portal-mediator
     steps:

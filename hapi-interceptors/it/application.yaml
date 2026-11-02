@@ -1,0 +1,81 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    allow-circular-references: true
+  flyway:
+    enabled: false
+    baseline-on-migrate: true
+    fail-on-missing-locations: false
+  datasource:
+    url: jdbc:postgresql://np-it-db:5432/hapi
+    username: admin
+    # password: SPRING_DATASOURCE_PASSWORD from .env (HAPI_DB_PASSWORD)
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+        show_sql: false
+        dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+        # NP Core's province/district/local-level ValueSets filter the
+        # administrative-location CodeSystem on its `level` property. HAPI can only
+        # expand such filters from the database with a full-text index; in-memory
+        # expansion fails (HAPI-3004) and every Nepal address is rejected.
+        search.enabled: true
+        search.backend.type: lucene
+        search.backend.analysis.configurer: ca.uhn.fhir.jpa.search.HapiHSearchAnalysisConfigurers$HapiLuceneAnalysisConfigurer
+        search.backend.directory.type: local-filesystem
+        search.backend.directory.root: /home/nonroot/lucene
+        search.backend.lucene_version: lucene_current
+
+hapi:
+  fhir:
+    default_encoding: json
+    # The identity mediator searches by identifier right after writing (read-before-
+    # merge). A reused cached result misses the new write and drops MRNs from other
+    # hospitals, so always run searches fresh.
+    reuse_cached_search_results_millis: 0
+    narrative_enabled: false
+    # Access rules (openhie/hapi-interceptors, jar mounted at /app/extra-classes):
+    # token check, SMART scopes, facility ownership, patient-scoped searches.
+    custom-bean-packages: np.openhie.hapi
+    custom-interceptor-classes: np.openhie.hapi.AccessInterceptor
+    # Hard cap on _count; a client cannot page the country in large chunks.
+    max_page_size: 100
+    default_page_size: 20
+    server_id_strategy: uuid
+    # Allow client-assigned ids on PUT (e.g. PUT /Patient/{nepalHealthId}); the
+    # default ALPHANUMERIC strategy rejects purely-numeric client ids.
+    client_id_strategy: ANY
+
+    # Load the Nepal NP Core IG (np.core 1.0.0) so the server knows the
+    # fhir.digitalhealth.gov.np/core profiles, value sets and naming systems and can validate
+    # resources against them. Tarball is mounted read-only by docker-compose.
+    implementationguides:
+      np_core:
+        name: np.core
+        version: 1.0.0
+        packageUrl: file:/app/config/np.core-1.0.0.tgz
+        # Store the IG's conformance resources, not just cache the package: the
+        # address ValueSets can only be expanded from stored, indexed CodeSystems.
+        installMode: STORE_AND_INSTALL
+
+    validation:
+      requests_enabled: true
+      responses_enabled: false
+
+    # Patient identity/matching moves to JeMPI (external MPI).
+
+    subscription:
+      resthook_enabled: true
+
+    tester:
+      - id: home
+        name: Local Tester
+        server_address: 'http://fhir:8080/fhir'
+        refuse_to_fetch_third_party_urls: false
+        fhir_version: R4

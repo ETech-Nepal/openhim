@@ -3,14 +3,7 @@ import { once } from 'node:events';
 import test from 'node:test';
 import type { Express } from 'express';
 
-Object.assign(process.env, {
-  DOTENV_CONFIG_PATH: '/dev/null', NODE_ENV: 'test',
-  MEDIATOR_URN: 'urn:test:portal', OPENHIM_API_URL: 'http://openhim.invalid',
-  OPENHIM_USERNAME: 'test', OPENHIM_PASSWORD: 'test', HAPI_FHIR_BASE_URL: 'http://hapi.invalid',
-  PORTAL_PATIENT_SHARED_SECRET: 'synthetic-test-secret-at-least-32-bytes',
-  PORTAL_PATIENT_TOKEN_ISSUER: 'urn:test:issuer', PORTAL_GID_CLAIM: 'gid',
-});
-delete process.env.PORTAL_PATIENT_JWKS_URL;
+await import('./fixtures/env.js');
 
 const { createApp } = await import('../src/app.js');
 

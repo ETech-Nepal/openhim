@@ -12,7 +12,15 @@ It runs three apps, each registered as its own OpenHIM channel
 | ----------------------------- | ----------------------- | ---------------------- | -------------------------------------------------------------------- |
 | `normal-mapper-v1`            | `/transform/patient`    | `transform-clients`    | Returns the FHIR Patient (`200`). Nothing is sent anywhere.          |
 | `nagarik-app-registration-v1` | `/nagarik/registration` | `national-app-clients` | POSTs the Patient to the NHID service (`nhid-registration`), `202`   |
-| `emr-mapper-v1`               | `/emr/encounter`        | `emr-clients`          | POSTs a transaction Bundle to the OpenHIM `/fhir` channel (`hapi-fhir`), which fhir-mediator routes to JeMPI and HAPI, `202` |
+| `emr-mapper-v1`               | `/emr/encounter`        | `emr-clients`          | Demo only, not deployed in single_stack: POSTs a transaction Bundle to the OpenHIM `/fhir` channel (`hapi-fhir`), `202` |
+| `cdrs-v1`                     | `/transform/cdrs`       | `hospital`             | Up to 100 CDRS rows. Per row: Patient to the identity mediator, Encounter to HAPI with the hospital's token. `200` with a result per row. |
+| `fhir-bundle-v1`              | `/fhir` (Bundle `POST`) | `hospital`, `laboratory` | A FHIR `batch` or `transaction` Bundle, not mapped. Patients to the identity mediator, the rest to HAPI with the client's token. `200` with the `<type>-response` Bundle. |
+
+`cdrs-v1` and `fhir-bundle-v1` are the platform's write path for non-FHIR rows and for
+Bundles that carry Patients (see `CRITICAL-FIXES.md` Part A). Their channels have
+priority 1 and forward the client's token; the mediator verifies it and takes the
+caller's facility (`caller_facility`) from it. Single FHIR resources go to HAPI
+through OpenHIM directly, and `POST /fhir/Patient` to the identity mediator.
 
 ```text
 Client → OpenHIM Core → Transform mediator → NP Core validator (in-container)
@@ -89,15 +97,19 @@ be set. `timeoutMs` is 10–120000, default 15000.
 | Key                         | Meaning                                                                                              |
 | --------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `route`                     | Unique. The OpenHIM channel matches `^<route>/?$`, `POST` only.                                      |
-| `role`                      | OpenHIM client role the channel allows                                                               |
+| `role`                      | OpenHIM client role, or roles, the channel allows                                                    |
+| `auth`                      | `true`: require the client's Keycloak token (forwarded by OpenHIM, verified against `KEYCLOAK_JWKS_URI`). Mappings can read `caller_facility`, the client's NHFR code. |
+| `input.format`              | `fields` (default): map the source JSON. `fhir`: the input is a FHIR Bundle, validated and delivered as sent. |
+| `input.rows`                | `{ max }`: accept a JSON array of up to `max` records; each is mapped, validated and delivered on its own (five at a time). |
 | `input.strict`              | `true` rejects any input key that no field selector covers                                           |
 | `input.fields.<name>`       | One canonical field: `path` (a selector) or `value` (a fixed app-level value), plus the rules below  |
 | `resources[]`               | `{ key, mapping, refs?, request? }`. One entry returns that resource; several build one Bundle.      |
 | `bundleType`                | `collection` or `transaction`; required exactly when there are several resources                     |
 | `resources[].refs`          | `{ "<canonical field>": "<other resource key>" }`: the field receives that entry's `urn:uuid:` fullUrl |
-| `resources[].request`       | Transaction entry request; defaults to `{ "method": "POST", "url": "<resourceType>" }`               |
+| `resources[].request`       | Transaction entry request; defaults to `{ "method": "POST", "url": "<resourceType>" }`. `ifNoneExist` may use `{field}` placeholders (values are URL-encoded). |
 | `validation`                | `{ channel, profile?, ignore?, messages? }`. `ignore` lists validator message fragments that do not block, such as the Health ID slice the downstream service fills in. `messages` sets the rule text per issue code (`code-invalid`, `required`, `default`), e.g. `"is not a valid NP Core code"`. |
-| `delivery`                  | Optional `{ channel, successStatuses, relayErrors? }`. Absent: the validated FHIR is returned with `200`. |
+| `identity`                  | Optional `{ channel }`: every Patient is registered there (the identity mediator) with the client's token before delivery; references to it are repointed to the stored Patient and it is left out of the delivered Bundle. |
+| `delivery`                  | Optional `{ channel, successStatuses, relayErrors?, mode?, forwardToken? }`. `mode: "acknowledge"` (default) is a one-way hand-off answered `202`; `mode: "fhir"` waits for the FHIR server and returns its result. `forwardToken` sends the client's own token. Absent: the validated FHIR is returned with `200`. |
 | `errors`                    | Optional `{ messages, template }`: the app's own error body (see below)                              |
 | `acknowledgement`           | Optional `{ message, template? }`: the body returned with `202` (see below)                          |
 
@@ -106,6 +118,11 @@ Field rules: `required`, `type` (`string` default, or `integer`), `maxLength`,
 `email`), `enum`, `minimum`/`maximum`, and `rule`, the fixed text shown when the
 value is invalid. Strings are trimmed. `echo: true` lets an error template read
 the field; use it only for request identifiers, never patient data.
+
+For SQL exports: `normalize: true` turns numbers into text and treats empty text,
+`none` and any `absent` values (e.g. `["0"]`) as not sent; `case` (`lower`, `upper`)
+folds the value before `enum` is checked; `format: "local-datetime"` with `offset`
+(e.g. `"+05:45"`) accepts `YYYY-MM-DD HH:MM:SS[.fff]` and produces ISO 8601.
 
 ### Selectors
 
@@ -129,7 +146,13 @@ contract gets a new file such as `patient.np-core.v2.json`.
 | `{ "$format": "Ward {ward_no}" }`       | String interpolation; every placeholder must be present                      |
 
 Every other JSON value is a literal. Optional output must be wrapped in `$if`,
-so an absent field is omitted, never serialized as `null` or `"undefined"`.
+so an absent field is omitted, never serialized as `null` or `"undefined"`. An array
+whose items are all omitted is itself omitted (FHIR forbids empty arrays).
+
+`cdrs-v1` and `fhir-bundle-v1` validate the Patient before the identity mediator adds
+its Health ID, so they ignore the missing `healthId` slice and the knock-on error on
+references to that in-Bundle Patient (`among choices: …np-core-patient,`); every other
+error on the Patient is still reported.
 
 ## Dispatch, acknowledgement, and errors
 
@@ -192,6 +215,10 @@ See `.env.example`.
 | `NHID_REGISTRATION_URL`     | —                              | NHID service that receives Nagarik Patients, for example `https://hiecoretest.mohp.gov.np/healthid/api/generate` |
 | `HAPI_FHIR_CHANNEL_URL`     | —                              | OpenHIM FHIR base for EMR Bundles, for example `http://openhim-core:5001/fhir` |
 | `HAPI_FHIR_CHANNEL_AUTHORIZATION` | —                        | Sent as `Authorization` on that channel (client with role `np-fhir-clients`) |
+| `IDENTITY_PATIENT_URL`      | —                              | The identity mediator's Patient endpoint, `http://identity-mediator:4002/fhir/Patient` |
+| `HAPI_FHIR_URL`             | —                              | HAPI's FHIR base on the Docker network, `http://fhir:8080/fhir`       |
+| `KEYCLOAK_ISSUER`           | —                              | Realm issuer, exactly as in tokens; required when an app has `auth`   |
+| `KEYCLOAK_JWKS_URI`         | —                              | Realm JWKS, reachable from the container                              |
 | `OPENHIM_REGISTER`          | `true`                         | Set `false` only for isolated local development                       |
 | `OPENHIM_API_URL`           | `https://openhim-core:8080`    | OpenHIM Core API                                                      |
 | `OPENHIM_USERNAME` / `OPENHIM_PASSWORD` | —                  | Required when registration is on                                      |
@@ -199,7 +226,7 @@ See `.env.example`.
 
 ## Build, test, run
 
-Requires Node 20.19 or later.
+Requires Node 24.22.1 or later (24 LTS), or 26.12.1 or later (26 LTS).
 
 ```bash
 cd services/fhir-transform-mediator

@@ -16,7 +16,9 @@ export function mediatorDefinition(config: Config, apps: AppDefinition[]) {
     type: "http",
     status: "enabled",
     methods: ["POST"],
-    allow: [app.role],
+    allow: app.roles,
+    // Ahead of the general /fhir channel to HAPI, so a Bundle POSTed to /fhir comes here.
+    priority: 1,
     routes: [
       {
         name: "FHIR Transform route",
@@ -24,14 +26,20 @@ export function mediatorDefinition(config: Config, apps: AppDefinition[]) {
         port: config.MEDIATOR_PORT,
         primary: true,
         type: "http",
+        // The client's token travels on to the identity mediator and HAPI.
+        forwardAuthHeader: app.auth,
       },
     ],
     requestBody: true,
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",
-    // Validation, then only the dispatch acceptance; downstream processing is not awaited.
-    timeout: app.validation.timeoutMs + (app.delivery?.timeoutMs ?? 0) + 5000,
+    // Acknowledge mode waits for validation and the dispatch acceptance. FHIR mode also
+    // waits for identity and the FHIR server, row by row (five at a time).
+    timeout:
+      app.delivery?.mode === "fhir"
+        ? 120000
+        : app.validation.timeoutMs + (app.delivery?.timeoutMs ?? 0) + 5000,
     properties: [],
     txViewAcl: [],
     txViewFullAcl: [],

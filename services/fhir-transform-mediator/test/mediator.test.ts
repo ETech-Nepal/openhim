@@ -31,6 +31,11 @@ const env = {
   NHID_REGISTRATION_URL: "http://nhid-generator:9090/generate",
   HAPI_FHIR_CHANNEL_URL: "http://openhim-core:5001/fhir",
   HAPI_FHIR_CHANNEL_AUTHORIZATION: "Basic aGFwaS1zZWNyZXQ=",
+  IDENTITY_PATIENT_URL: "http://identity-mediator:4002/fhir/Patient",
+  HAPI_FHIR_URL: "http://fhir:8080/fhir",
+  KEYCLOAK_ISSUER: "http://keycloak.test/realms/openhie",
+  KEYCLOAK_JWKS_URI:
+    "http://keycloak:8080/realms/openhie/protocol/openid-connect/certs",
 };
 
 // Copies the shipped catalog to a temporary directory, then applies test edits to it.
@@ -81,7 +86,7 @@ const withCitizen = (citizen: Record<string, unknown>) => ({
   citizen,
 });
 
-test("catalog loads the three deployed apps, each with its own delivery", () => {
+test("catalog loads the deployed apps, each with its own delivery", () => {
   const catalog = loadCatalog({ CONFIG_DIR: configDir }, env);
   assert.deepEqual(
     catalog.apps.map((item) => [item.id, item.route, item.delivery?.url]),
@@ -93,6 +98,8 @@ test("catalog loads the three deployed apps, each with its own delivery", () => 
       ],
       ["normal-mapper-v1", "/transform/patient", undefined],
       ["emr-mapper-v1", "/emr/encounter", env.HAPI_FHIR_CHANNEL_URL],
+      ["cdrs-v1", "/transform/cdrs", env.HAPI_FHIR_URL],
+      ["fhir-bundle-v1", "/fhir", env.HAPI_FHIR_URL],
     ],
   );
   // A channel an app uses must be configured.
@@ -729,12 +736,24 @@ test("OpenHIM registration creates one channel per app without endpoint secrets"
         ["transform-clients"],
       ],
       ["FHIR Middleware: emr-mapper-v1", "^/emr/encounter/?$", ["emr-clients"]],
+      ["FHIR Middleware: cdrs-v1", "^/transform/cdrs/?$", ["hospital"]],
+      [
+        "FHIR Middleware: fhir-bundle-v1",
+        "^/fhir/?$",
+        ["hospital", "laboratory"],
+      ],
     ],
   );
-  // Validation plus dispatch acceptance only; no downstream processing time.
+  // Acknowledge mode: validation plus dispatch acceptance only. FHIR mode waits for the
+  // FHIR server.
   assert.deepEqual(
     channels.map((channel) => channel.timeout),
-    [30000, 20000, 35000],
+    [30000, 20000, 35000, 120000, 120000],
+  );
+  // Only apps that use the client's own token forward it.
+  assert.deepEqual(
+    channels.map((channel) => channel.routes[0].forwardAuthHeader),
+    [false, false, false, true, true],
   );
   const serialized = JSON.stringify(definition);
   for (const value of Object.values(env))

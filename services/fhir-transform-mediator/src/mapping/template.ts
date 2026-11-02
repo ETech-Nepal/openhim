@@ -94,7 +94,8 @@ export function render(
       const value = render(item, fields, provenance, `${path}[${out.length}]`);
       if (value !== OMIT) out.push(value);
     }
-    return out;
+    // An array whose items were all omitted is left out: FHIR forbids empty arrays.
+    return out.length || !node.length ? out : OMIT;
   }
   if (!isObject(node)) return node;
   const parsed = directive(node);

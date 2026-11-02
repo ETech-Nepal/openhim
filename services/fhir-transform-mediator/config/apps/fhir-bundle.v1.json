@@ -1,0 +1,29 @@
+{
+  "route": "/fhir",
+  "role": [
+    "hospital",
+    "laboratory"
+  ],
+  "auth": true,
+  "input": {
+    "format": "fhir"
+  },
+  "validation": {
+    "channel": "validator",
+    "ignore": [
+      "Slice 'Patient.identifier:healthId': a matching slice is required, but not found",
+      "among choices: http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-patient,"
+    ]
+  },
+  "identity": {
+    "channel": "identity"
+  },
+  "delivery": {
+    "channel": "hapi",
+    "successStatuses": [
+      200
+    ],
+    "mode": "fhir",
+    "forwardToken": true
+  }
+}

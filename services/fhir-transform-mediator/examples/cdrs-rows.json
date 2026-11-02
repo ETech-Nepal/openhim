@@ -1,0 +1,15 @@
+[
+  {
+    "hospital_patient_number": "2405078",
+    "encounter_number": "SMOKE-1",
+    "first_name": "CHANDRIKA",
+    "last_name": "KANDEL",
+    "sex": "Female",
+    "dob": "1990-01-15",
+    "phone_number": "9841000001",
+    "department_type": "C",
+    "department_id": "22",
+    "department_name": "Family Medicine",
+    "visit_date_ad_time": "2026-07-28 00:02:00.000"
+  }
+]

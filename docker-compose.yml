@@ -224,15 +224,22 @@ services:
 
   fhir:
     container_name: fhir
-    image: hapiproject/hapi:latest
+    # Stock HAPI 8.12 plus the access rules (hapi-interceptors/). Every request needs a
+    # token from the realm; see hapi-interceptors/README.md.
+    build:
+      context: ./hapi-interceptors
     restart: unless-stopped
     networks:
       - openhim
     depends_on:
       hapi-db:
         condition: service_healthy
+    environment:
+      NP_AUTH_ISSUER: "${KEYCLOAK_ISSUER:-http://localhost:8083/realms/openhie}"
+      NP_AUTH_JWKS_URI: "http://keycloak:8080/realms/openhie/protocol/openid-connect/certs"
+      NP_IDENTITY_CLIENT_ID: identity-mediator
+      NP_PHONE_LOOKUP_CLIENT_IDS: patient-portal-mediator
     # No host port. All FHIR traffic goes through OpenHIM (openhim-config/hapi-channels.json).
-    # Publishing 8080 here would allow unauthenticated read/write on the FHIR store.
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
       - ./hapi-config/np.core-1.0.0.tgz:/app/config/np.core-1.0.0.tgz:ro
@@ -242,87 +249,22 @@ services:
       timeout: 20s
       retries: 10
 
-  # ── FHIR MPI Orchestrator mediator ──
-  # Runs in Docker on the `openhim` network. OpenHIM reaches it at mediator:4000
-  # (the channel route host, see MEDIATOR_ROUTE_HOST in services/fhir-mediator/.env). It
-  # self-registers its role + channel with OpenHIM on startup.
-  # See services/fhir-mediator/README.md.
-  mediator:
-    container_name: mediator
+  # ── Identity mediator ──
+  # Every Patient write (JeMPI, the Health ID register, HAPI) and the duplicate review
+  # queue for the admin portal. Channels: POST/PUT /fhir/Patient and /admin. See
+  # services/identity-mediator/README.md. No host port: OpenHIM reaches it at
+  # identity-mediator:4002.
+  identity-mediator:
+    container_name: identity-mediator
     build:
-      context: ./services/fhir-mediator
+      context: ./services/identity-mediator
     restart: unless-stopped
     networks:
       - openhim
     volumes:
-      - "./services/fhir-mediator:/app"
-      - "/app/node_modules"
-    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
-    env_file:
-      - ./services/fhir-mediator/.env
-    # No host port. OpenHIM reaches it at mediator:4000 internally. The mediator has
-    # no auth of its own — it trusts OpenHIM's channel/role check — so a published
-    # port lets anyone write to the FHIR store bypassing auth. Debug-only: "4000:4000".
-    depends_on:
-      - "openhim-core"
-      - "fhir"
-
-  # ── FHIR Intake mediator ──
-  # Owns the /ingest channel: accepts raw CDRS encounter JSON (application/json) or
-  # supported FHIR JSON (application/fhir+json) and pushes both through the FHIR MPI
-  # Orchestrator above (reached at mediator:4000 on the openhim network). It derives
-  # the NHFR facility from X-OpenHIM-ClientID and never trusts an inbound X-NHFR-ID.
-  # No host port — OpenHIM reaches it at fhir-intake-mediator:4003. See
-  # services/fhir-intake-mediator/README.md.
-  fhir-intake-mediator:
-    container_name: fhir-intake-mediator
-    build:
-      context: ./services/fhir-intake-mediator
-    restart: unless-stopped
-    networks:
-      - openhim
-    volumes:
-      - "./services/fhir-intake-mediator:/app"
-      - "/app/node_modules"
-    command: sh -c "npm ci --include=dev && npm run build && npm run dev"
-    env_file:
-      - ./services/fhir-intake-mediator/.env
-    depends_on:
-      openhim-core:
-        condition: service_started
-      mediator:
-        condition: service_started
-
-  # ── Patient Admin Review mediator ──
-  # Owns the /admin channel: the duplicate-patient review queue and the merge that
-  # resolves a pair in BOTH JeMPI and HAPI. OpenHIM reaches it at admin-mediator:4002.
-  #
-  # It exists because JeMPI's own review queue is always empty for us: the write-side
-  # mediator registers via crRegister (deterministic find-or-create), which never runs
-  # probabilistic linking and never emits notifications. This service finds near-miss
-  # duplicates itself and resolves them via JeMPI /relink. See admin-mediator/README.md.
-  #
-  # jempi-config is mounted read-only so the scorer reads the SAME m/u link weights
-  # JeMPI is deployed with, instead of a drifting copy.
-  admin-mediator:
-    container_name: admin-mediator
-    build:
-      context: ./admin-mediator
-    restart: unless-stopped
-    networks:
-      - openhim
-    volumes:
-      - "./admin-mediator:/app"
-      - "/app/node_modules"
       - "./jempi-config:/config:ro"
-    command: sh -c "npm install && npm run dev"
     env_file:
-      - ./admin-mediator/.env
-    # No host port. OpenHIM reaches it at admin-mediator:4002 internally. CRITICAL:
-    # this mediator executes IRREVERSIBLE patient merges and has no auth of its own
-    # (relies entirely on OpenHIM's np-admin-clients role check). A published port
-    # let anyone merge patients unauthenticated AND with no transaction-log entry.
-    # Debug-only: "4002:4002".
+      - ./services/identity-mediator/.env
     depends_on:
       hapi-db:
         condition: service_healthy
@@ -331,23 +273,44 @@ services:
       fhir:
         condition: service_started
 
+  # ── Transform mediator ──
+  # CDRS rows (/transform/cdrs) and FHIR Bundles that carry Patients (POST /fhir). See
+  # services/fhir-transform-mediator/README.md. No host port.
+  transform-mediator:
+    container_name: transform-mediator
+    build:
+      context: ./services/fhir-transform-mediator
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      - openhim
+    volumes:
+      - ./hapi-config/np.core-1.0.0.tgz:/config/np.core-1.0.0.tgz:ro
+    env_file:
+      - ./services/fhir-transform-mediator/.env
+    depends_on:
+      - "openhim-core"
+      - "identity-mediator"
+
   # ── Patient Portal mediator (read-only) ──
   # Dedicated mediator for the patient portal. Owns the /patient-portal channel,
-  # verifies the forwarded X-Patient-Token, and reads HAPI directly. OpenHIM
+  # verifies the forwarded X-Patient-Token, and reads HAPI with its own client token. OpenHIM
   # reaches it at patient-portal-mediator:4001. See patient-portal-mediator/.
   patient-portal-mediator:
     container_name: patient-portal-mediator
     build:
-      context: ./patient-portal-mediator
+      context: ./services/patient-portal-mediator
     restart: unless-stopped
     networks:
       - openhim
     volumes:
-      - "./patient-portal-mediator:/app"
+      - "./services/patient-portal-mediator:/app"
       - "/app/node_modules"
     command: sh -c "npm install && npm run dev"
     env_file:
-      - ./patient-portal-mediator/.env
+      - ./services/patient-portal-mediator/.env
     # No host port. OpenHIM reaches it at patient-portal-mediator:4001 internally.
     # A published port bypasses the OpenHIM channel; the mediator's own
     # X-Patient-Token check still applies, but /patient-portal/resolve is

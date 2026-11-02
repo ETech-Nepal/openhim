@@ -1,0 +1,84 @@
+{
+  "id": "encounter.cdrs.v1",
+  "resourceType": "Encounter",
+  "fields": {
+    "caller_facility": "required",
+    "encounter_number": "required",
+    "registration_number": "optional",
+    "department_type": "required",
+    "department_id": "required",
+    "department_name": "required",
+    "visit_start": "required",
+    "subject_reference": "required"
+  },
+  "template": {
+    "resourceType": "Encounter",
+    "meta": {
+      "profile": [
+        "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-encounter"
+      ]
+    },
+    "identifier": [
+      {
+        "use": "official",
+        "system": {
+          "$format": "http://nhfr.digitalhealth.gov.np/{caller_facility}"
+        },
+        "value": {
+          "$field": "encounter_number"
+        }
+      },
+      {
+        "$if": "registration_number",
+        "then": {
+          "system": "http://mohp.gov.np/fhir/NamingSystem/registration-number",
+          "value": {
+            "$field": "registration_number"
+          }
+        }
+      }
+    ],
+    "status": "finished",
+    "class": {
+      "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+      "code": {
+        "$lookup": "department_type",
+        "map": {
+          "C": "AMB",
+          "E": "EMER",
+          "N": "IMP"
+        }
+      }
+    },
+    "type": [
+      {
+        "coding": [
+          {
+            "system": {
+              "$format": "http://mohp.gov.np/fhir/CodeSystem/{caller_facility}/department"
+            },
+            "code": {
+              "$field": "department_id"
+            },
+            "display": {
+              "$field": "department_name"
+            }
+          }
+        ],
+        "text": {
+          "$field": "department_name"
+        }
+      }
+    ],
+    "subject": {
+      "reference": {
+        "$field": "subject_reference"
+      }
+    },
+    "period": {
+      "start": {
+        "$field": "visit_start"
+      }
+    }
+  }
+}

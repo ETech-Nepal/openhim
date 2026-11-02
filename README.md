@@ -1,60 +1,65 @@
 # OpenHIE Nepal Health Interoperability Platform
 
-An OpenHIE-style health information exchange for hospital systems, CDRS intake,
-and patient-facing services using FHIR R4.
+An OpenHIE-style health information exchange for hospital and laboratory systems
+and CDRS intake, using FHIR R4 and the NP Core 1.0.0 implementation guide.
 
-OpenHIM authenticates and routes requests. The mediators manage patient
-identity, FHIR persistence, duplicate review, CDRS conversion, and
-patient-scoped reads. HAPI FHIR stores clinical records, Keycloak issues client
-tokens, and JeMPI provides the external master patient index.
+OpenHIM authenticates every request (DPoP-bound Keycloak token) and routes it.
+FHIR clients use the standard `/fhir` base: Patient writes go to the identity
+mediator, Bundles to the transform mediator, everything else straight to HAPI
+FHIR. HAPI enforces the access rules itself, so a client's rights are the same
+whichever route its request takes.
 
 ## Components
 
-- **OpenHIM Core and Console**: authentication, routing, and transaction audit trail.
-- **Keycloak**: hospital and service-client authentication using RS256 JWTs.
-- **FHIR MPI Orchestrator**: patient registration, Nepal Health ID generation,
-  JeMPI matching, and HAPI FHIR writes.
-- **FHIR Intake mediator**: converts raw CDRS encounter rows into FHIR
-  transactions through `POST /ingest`.
-- **Admin Review mediator**: identifies and merges possible duplicate records.
-- **Patient Portal mediator**: returns patient-scoped, read-only clinical summaries.
-- **HAPI FHIR**: the clinical FHIR R4 data store.
-- **JeMPI**: the external master patient index.
+| Component | Source | Does |
+| --- | --- | --- |
+| HAPI FHIR + access rules | [`hapi-interceptors/`](hapi-interceptors/README.md) | Clinical store. The plugin verifies the token on every request, checks SMART v2 scopes, stamps and checks the owning facility, limits searches to one patient, redirects references to merged Patients, and accepts Patient writes only from the identity mediator |
+| Identity mediator | [`services/identity-mediator/`](services/identity-mediator/README.md) | Every Patient write: JeMPI match, Health ID issuing (its `health_ids` table is the only issuer), HAPI Patient upsert with `If-Match`, per-hospital MRNs. Duplicate review and merge for the admin portal (`/admin`) |
+| Transform mediator | [`services/fhir-transform-mediator/`](services/fhir-transform-mediator/README.md) | Config-driven input: CDRS rows on `/transform/cdrs`, FHIR Bundles posted to `/fhir`. Validates against NP Core, sends Patients to the identity mediator and the rest to HAPI with the client's token, one result per row |
+| OpenHIM Core and Console | | Authentication, routing, transaction log |
+| Keycloak | [`keycloak/`](keycloak/README.md) | Clients, SMART scopes per client type, DPoP-bound tokens |
+| JeMPI | [`jempi-config/`](jempi-config/README.md) | Client registry (golden records), on its own host |
 
-## Start locally
+`services/patient-portal-mediator` serves the patient portal (outside the PRS scope).
+It reads HAPI with its own read-only client, the only client allowed to find a
+Patient by phone.
 
-```bash
-git clone https://github.com/ETech-Nepal/openhim_single.git openhie_stack
-cd openhie_stack
-docker compose up -d --build
-```
+Routes:
 
-The stack needs Docker Compose v2, mediator `.env` files, and a reachable JeMPI
-instance. Follow the deployment repository's README and the
-[Linux installation guide](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/04-linux-installation.md) before starting it.
+| Route | Goes to |
+| --- | --- |
+| `POST`, `PUT /fhir/Patient[/<id>]` | Identity mediator |
+| `POST /fhir` (Bundle) | Transform mediator, `fhir-bundle-v1` |
+| `POST /transform/cdrs` | Transform mediator, `cdrs-v1` (up to 100 rows) |
+| `GET /fhir/...`, `POST`, `PUT /fhir/<Type>[/<id>]` | HAPI |
+| `/admin/*` | Identity mediator (admin portal only) |
+
+No route allows DELETE, and no facility may write Organizations or Practitioners.
+The design and the defects it fixes are in [CRITICAL-FIXES.md](CRITICAL-FIXES.md).
+
+## Deploy
+
+The deployment lives in the `single_stack` repository
+([openhim_single](https://github.com/ETech-Nepal/openhim_single)); its README covers
+configuration, first start, onboarding, upgrading an existing stack and the smoke
+test. It pulls the images CI publishes from this repository, tagged with the commit
+SHA: `openhie-hapi`, `openhie-identity-mediator`, `fhir-transform-mediator`.
+
+`docker-compose.yml` here builds the same services from source for development.
+
+## Test
+
+| What | How |
+| --- | --- |
+| Identity mediator | `cd services/identity-mediator && npm test` (needs PostgreSQL; see its README) |
+| Transform mediator | `cd services/fhir-transform-mediator && npm test` |
+| HAPI plugin | `cd hapi-interceptors`, then `mvn package` and `./it/run.sh` (real HAPI image; see its README) |
+| Whole stack | Build the three images with tag `e2e`, run `e2e/up.sh <scratch-dir>` (local stack with a JeMPI stub, ports 15000, 18080, 18081, 18083), run `docs/tor/evidence/run_e2e.py` against it (settings in the script's header), then `e2e/down.sh <scratch-dir>` |
+
+A run against the JeMPI stub checks behaviour only. The evidence files in
+`docs/tor/evidence/` must come from a run against the real stack and JeMPI.
 
 ## Documentation
 
-Start with the [documentation index](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/00-documentation-index.md).
-
-| Need | Document |
-|---|---|
-| Install and configure the stack | [Linux installation](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/04-linux-installation.md) · [Manual setup](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/07-manual-setup.md) |
-| Deploy to a VPS | [VPS deployment](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/05-vps-deployment.md) |
-| Understand components and data flows | [System architecture](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/14-system-architecture.md) · [Data flow diagrams](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/15-data-flow-diagrams.md) |
-| Review API endpoints and payloads | [API reference](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/16-api-reference.md) |
-| Configure identity matching | [JeMPI configuration](jempi-config/README.md) |
-| Understand Nepal Health IDs | [Health ID generation](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/13-hid-generation.md) |
-
-## Service documentation
-
-- [FHIR MPI Orchestrator](services/fhir-mediator/README.md)
-- [FHIR Intake mediator](services/fhir-intake-mediator/README.md)
-- [Admin Review mediator](services/admin-mediator/README.md)
-- [Keycloak setup](keycloak/README.md)
-
-## Security note
-
-Keep mediators on the internal Docker network. OpenHIM provides their client
-authentication and transaction logging. For a public deployment, use the Caddy
-VPS profile and replace the default credentials before exposing any service.
+Operator and architecture documentation is in
+[openhim_docs](https://github.com/ETech-Nepal/openhim_docs/blob/main/docs/00-documentation-index.md).

@@ -3,6 +3,20 @@
     "id": "nagarik-app-registration-v1",
     "config": "apps/nagarik-registration.v1.json"
   },
-  { "id": "normal-mapper-v1", "config": "apps/normal-mapper.v1.json" },
-  { "id": "emr-mapper-v1", "config": "apps/emr-mapper.v1.json" }
+  {
+    "id": "normal-mapper-v1",
+    "config": "apps/normal-mapper.v1.json"
+  },
+  {
+    "id": "emr-mapper-v1",
+    "config": "apps/emr-mapper.v1.json"
+  },
+  {
+    "id": "cdrs-v1",
+    "config": "apps/cdrs.v1.json"
+  },
+  {
+    "id": "fhir-bundle-v1",
+    "config": "apps/fhir-bundle.v1.json"
+  }
 ]

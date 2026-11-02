@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { AppDefinition } from "./config.js";
+import type { Caller } from "./auth.js";
+import { normalizeValue, type AppDefinition } from "./config.js";
 import { postJson, TransportError, type Transport } from "./http.js";
 import { selectSegments, type Segment } from "./mapping/select.js";
 import {
@@ -12,6 +13,8 @@ import {
 
 export type Context = {
   correlationId: string;
+  // Set for apps with `auth: true`: the verified client and its Authorization header.
+  caller?: Caller;
 };
 export type Orchestration = {
   name: string;
@@ -22,6 +25,7 @@ export type Result = {
   status: number;
   body: unknown;
   orchestrations: Orchestration[];
+  contentType?: string;
 };
 // Every message is fixed text or a field name. Submitted values and upstream text never appear.
 export type Issue = {
@@ -181,16 +185,20 @@ function unknownKeys(app: AppDefinition, input: unknown) {
   return issues;
 }
 
-function extract(app: AppDefinition, input: unknown) {
+export function extract(app: AppDefinition, input: unknown, context: Context) {
   const fields: CanonicalFields = new Map();
   const issues: Issue[] = [];
+  if (context.caller) fields.set("caller_facility", context.caller.clientId);
   for (const spec of app.fields) {
     if (spec.value !== undefined) {
       fields.set(spec.name, spec.value);
       continue;
     }
     const at = { field: spec.field, path: spec.segments };
-    const value = selectSegments(input, spec.segments);
+    const value = normalizeValue(
+      spec.normalize,
+      selectSegments(input, spec.segments),
+    );
     if (value === undefined) {
       if (spec.required)
         issues.push({
@@ -213,7 +221,7 @@ function extract(app: AppDefinition, input: unknown) {
   return { fields, issues };
 }
 
-function build(
+export function build(
   app: AppDefinition,
   fields: CanonicalFields,
   provenance: Map<string, string>,
@@ -246,14 +254,30 @@ function build(
         fullUrl: urls.get(resource.key),
         resource: rendered,
         ...(app.bundleType === "transaction" && {
-          request: resource.request ?? {
-            method: "POST",
-            url: resource.mapping.resourceType,
-          },
+          request: resource.request
+            ? {
+                method: resource.request.method,
+                url: resource.request.url,
+                ...(resource.request.ifNoneExist && {
+                  ifNoneExist: conditional(
+                    resource.request.ifNoneExist,
+                    scoped,
+                  ),
+                }),
+              }
+            : { method: "POST", url: resource.mapping.resourceType },
         }),
       };
     }),
   };
+}
+
+// "identifier={system}|{value}" with each value URL-encoded.
+function conditional(text: string, fields: CanonicalFields) {
+  return text.replace(/\{([a-z][a-z0-9_]*)\}/g, (_, name: string) => {
+    if (!fields.has(name)) throw new FieldError(name, "required");
+    return encodeURIComponent(String(fields.get(name)));
+  });
 }
 
 // Finds the canonical field behind a validator FHIRPath: the path itself, an element built
@@ -333,25 +357,13 @@ function validationIssues(
   });
 }
 
-export async function execute(
+// Calls one endpoint and records it as an orchestration.
+export function caller(
   app: AppDefinition,
-  input: unknown,
-  context: Context,
-  transport: Transport = postJson,
-): Promise<Result> {
-  const orchestrations: Orchestration[] = [];
-  const fail = (
-    status: number,
-    error: string,
-    stage: string,
-    issues?: Issue[],
-  ) =>
-    failure(status, error, context, stage, app, {
-      issues,
-      orchestrations,
-      input,
-    });
-  const call = async (
+  orchestrations: Orchestration[],
+  transport: Transport,
+) {
+  return async (
     stage: string,
     endpoint: { url: string; authorization?: string; timeoutMs: number },
     url: URL,
@@ -374,10 +386,10 @@ export async function execute(
         body,
         timeoutMs: endpoint.timeoutMs,
         headers: {
-          ...headers,
           ...(endpoint.authorization && {
             Authorization: endpoint.authorization,
           }),
+          ...headers,
         },
       });
       entry.response.status = response.status;
@@ -386,28 +398,59 @@ export async function execute(
       entry.response.timestamp = new Date().toISOString();
     }
   };
-  const timedOut = (error: unknown) =>
-    error instanceof TransportError && error.timeout;
+}
+export type Call = ReturnType<typeof caller>;
 
-  const { fields, issues } = extract(app, input);
-  if (issues.length)
-    return fail(400, "request_mapping_failed", "request-mapping", issues);
+export const timedOut = (error: unknown) =>
+  error instanceof TransportError && error.timeout;
+
+/**
+ * Map (or take as given, for FHIR input) and validate one record.
+ * Returns the resource to deliver, or the failure to answer with.
+ */
+export async function prepare(
+  app: AppDefinition,
+  input: unknown,
+  context: Context,
+  call: Call,
+  orchestrations: Orchestration[],
+): Promise<{ resource: Record<string, unknown> } | { result: Result }> {
+  const fail = (
+    status: number,
+    error: string,
+    stage: string,
+    issues?: Issue[],
+  ) => ({
+    result: failure(status, error, context, stage, app, {
+      issues,
+      orchestrations,
+      input,
+    }),
+  });
+
   const provenance = new Map<string, string>();
   let resource: Record<string, unknown>;
-  try {
-    resource = build(app, fields, provenance);
-  } catch (error) {
-    if (!(error instanceof FieldError)) throw error;
-    const source = app.fields.find((field) => field.name === error.field);
-    const field = source?.field ?? error.field;
-    return fail(400, "request_mapping_failed", "request-mapping", [
-      {
-        code: error.reason,
-        field,
-        ...(source && { path: source.segments }),
-        message: `${field} ${error.reason === "required" ? "is required" : "is not a supported value"}`,
-      },
-    ]);
+  if (app.format === "fhir") {
+    resource = input as Record<string, unknown>;
+  } else {
+    const { fields, issues } = extract(app, input, context);
+    if (issues.length)
+      return fail(400, "request_mapping_failed", "request-mapping", issues);
+    try {
+      resource = build(app, fields, provenance);
+    } catch (error) {
+      if (!(error instanceof FieldError)) throw error;
+      const source = app.fields.find((field) => field.name === error.field);
+      const field = source?.field ?? error.field;
+      return fail(400, "request_mapping_failed", "request-mapping", [
+        {
+          code: error.reason,
+          field,
+          ...(source && { path: source.segments }),
+          message: `${field} ${error.reason === "required" ? "is required" : "is not a supported value"}`,
+        },
+      ]);
+    }
   }
 
   const stage = "request-validation";
@@ -441,7 +484,23 @@ export async function execute(
       stage,
       validationIssues(app, blocking, provenance),
     );
+  return { resource };
+}
+
+export async function execute(
+  app: AppDefinition,
+  input: unknown,
+  context: Context,
+  transport: Transport = postJson,
+): Promise<Result> {
+  const orchestrations: Orchestration[] = [];
+  const call = caller(app, orchestrations, transport);
+  const prepared = await prepare(app, input, context, call, orchestrations);
+  if ("result" in prepared) return prepared.result;
+  const { resource } = prepared;
   if (!app.delivery) return { status: 200, body: resource, orchestrations };
+  const fail = (status: number, error: string, stage: string) =>
+    failure(status, error, context, stage, app, { orchestrations, input });
 
   // One-way hand-off: a success body is never read, and the request is never retried,
   // because a timed-out request may already have been accepted.
