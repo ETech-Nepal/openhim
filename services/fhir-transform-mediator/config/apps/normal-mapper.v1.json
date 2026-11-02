@@ -1,5 +1,6 @@
 {
   "route": "/transform/patient",
+  "channel": "transform",
   "role": "transform-clients",
   "input": {
     "strict": false,

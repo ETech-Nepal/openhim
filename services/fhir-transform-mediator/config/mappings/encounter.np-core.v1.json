@@ -1,0 +1,65 @@
+{
+  "id": "encounter.np-core.v1",
+  "resourceType": "Encounter",
+  "fields": {
+    "facility_code": "required",
+    "encounter_number": "required",
+    "status": "required",
+    "class_code": "required",
+    "encounter_type": "optional",
+    "patient_reference": "required",
+    "start": "required",
+    "end": "optional",
+    "reason_text": "optional"
+  },
+  "template": {
+    "resourceType": "Encounter",
+    "meta": {
+      "profile": [
+        "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-encounter"
+      ]
+    },
+    "identifier": [
+      {
+        "use": "official",
+        "system": {
+          "$format": "http://nhfr.digitalhealth.gov.np/{facility_code}"
+        },
+        "value": { "$field": "encounter_number" }
+      }
+    ],
+    "status": { "$field": "status" },
+    "class": {
+      "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+      "code": { "$field": "class_code" }
+    },
+    "type": {
+      "$if": "encounter_type",
+      "then": [
+        {
+          "coding": [
+            {
+              "system": "http://fhir.digitalhealth.gov.np/core/CodeSystem/encounter-type",
+              "code": { "$field": "encounter_type" }
+            }
+          ]
+        }
+      ]
+    },
+    "subject": { "reference": { "$field": "patient_reference" } },
+    "period": {
+      "start": { "$field": "start" },
+      "end": { "$if": "end", "then": { "$field": "end" } }
+    },
+    "reasonCode": {
+      "$if": "reason_text",
+      "then": [{ "text": { "$field": "reason_text" } }]
+    },
+    "serviceProvider": {
+      "identifier": {
+        "system": "http://nhfr.digitalhealth.gov.np",
+        "value": { "$field": "facility_code" }
+      }
+    }
+  }
+}

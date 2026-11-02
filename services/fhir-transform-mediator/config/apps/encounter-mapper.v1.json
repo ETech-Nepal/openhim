@@ -1,0 +1,104 @@
+{
+  "route": "/transform/encounter",
+  "channel": "transform",
+  "role": "transform-clients",
+  "input": {
+    "strict": false,
+    "fields": {
+      "facility_code": {
+        "path": "$.facility_code",
+        "required": true,
+        "pattern": "\\d{1,20}",
+        "rule": "must be the facility's NHFR code (digits only)"
+      },
+      "encounter_number": {
+        "path": "$.encounter_number",
+        "required": true,
+        "maxLength": 100
+      },
+      "status": {
+        "path": "$.status",
+        "required": true,
+        "enum": [
+          "planned",
+          "arrived",
+          "triaged",
+          "in-progress",
+          "onleave",
+          "finished",
+          "cancelled",
+          "entered-in-error",
+          "unknown"
+        ],
+        "rule": "must be a FHIR encounter status, for example finished"
+      },
+      "class_code": {
+        "path": "$.class_code",
+        "required": true,
+        "enum": [
+          "AMB",
+          "EMER",
+          "IMP",
+          "ACUTE",
+          "NONAC",
+          "OBSENC",
+          "PRENC",
+          "SS",
+          "VR",
+          "HH"
+        ],
+        "rule": "must be one of AMB, EMER, IMP, ACUTE, NONAC, OBSENC, PRENC, SS, VR, HH"
+      },
+      "encounter_type": {
+        "path": "$.encounter_type",
+        "enum": [
+          "new-visit",
+          "follow-up",
+          "referral-visit",
+          "emergency-visit",
+          "inpatient-admission",
+          "daycare",
+          "lab-only",
+          "imaging-only",
+          "pharmacy-only",
+          "procedure-visit",
+          "anc",
+          "pnc",
+          "delivery",
+          "immunization",
+          "family-planning",
+          "growth-monitoring",
+          "counseling",
+          "screening"
+        ],
+        "rule": "must be an NP Core encounter type, for example new-visit"
+      },
+      "patient_reference": {
+        "path": "$.patient_reference",
+        "required": true,
+        "pattern": "Patient/[A-Za-z0-9\\-.]{1,64}",
+        "rule": "must be Patient/<id>"
+      },
+      "start": {
+        "path": "$.start",
+        "required": true,
+        "pattern": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})",
+        "rule": "must be an ISO date-time with a time zone"
+      },
+      "end": {
+        "path": "$.end",
+        "pattern": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})",
+        "rule": "must be an ISO date-time with a time zone"
+      },
+      "reason_text": {
+        "path": "$.reason_text",
+        "maxLength": 500
+      }
+    }
+  },
+  "resources": [{ "key": "encounter", "mapping": "encounter.np-core.v1" }],
+  "validation": {
+    "channel": "validator",
+    "profile": "http://fhir.digitalhealth.gov.np/core/StructureDefinition/np-core-encounter"
+  }
+}

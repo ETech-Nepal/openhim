@@ -97,6 +97,7 @@ test("catalog loads the deployed apps, each with its own delivery", () => {
         env.NHID_REGISTRATION_URL,
       ],
       ["normal-mapper-v1", "/transform/patient", undefined],
+      ["encounter-mapper-v1", "/transform/encounter", undefined],
       ["emr-mapper-v1", "/emr/encounter", env.HAPI_FHIR_CHANNEL_URL],
       ["cdrs-v1", "/transform/cdrs", env.HAPI_FHIR_URL],
       ["fhir-bundle-v1", "/fhir", env.HAPI_FHIR_URL],
@@ -163,6 +164,19 @@ test("catalog rejects invalid app, mapping, channel, path, and endpoint configur
       delete value.bundleType;
       return value;
     }),
+  );
+  // A shared channel whose apps need different roles, or sit under different parents.
+  rejects((dir) =>
+    editJson(dir, "apps/encounter-mapper.v1.json", (value) => ({
+      ...value,
+      role: "hospital",
+    })),
+  );
+  rejects((dir) =>
+    editJson(dir, "apps/encounter-mapper.v1.json", (value) => ({
+      ...value,
+      route: "/emr/visit",
+    })),
   );
   // An error template that reads a patient field.
   rejects((dir) =>
@@ -712,7 +726,7 @@ test("EMR selector app builds one transaction Bundle with internal references", 
   );
 });
 
-test("OpenHIM registration creates one channel per app without endpoint secrets", () => {
+test("OpenHIM registration creates one channel per app, or per shared channel, without endpoint secrets", () => {
   const definition = mediatorDefinition(
     parseConfig({ OPENHIM_REGISTER: "false" }),
     apps,
@@ -730,9 +744,11 @@ test("OpenHIM registration creates one channel per app without endpoint secrets"
         "^/nagarik/registration/?$",
         ["national-app-clients"],
       ],
+      // /transform/patient and /transform/encounter share one channel; /transform/cdrs
+      // belongs to another app and role, so the shared pattern leaves it out.
       [
-        "FHIR Middleware: normal-mapper-v1",
-        "^/transform/patient/?$",
+        "FHIR Middleware: transform",
+        "^/transform/(?!(?:cdrs)/?$)[^/]+/?$",
         ["transform-clients"],
       ],
       ["FHIR Middleware: emr-mapper-v1", "^/emr/encounter/?$", ["emr-clients"]],
@@ -750,6 +766,20 @@ test("OpenHIM registration creates one channel per app without endpoint secrets"
     channels.map((channel) => channel.timeout),
     [30000, 20000, 35000, 120000, 120000],
   );
+  const shared = new RegExp(channels[1].urlPattern);
+  for (const path of [
+    "/transform/patient",
+    "/transform/encounter/",
+    "/transform/observation",
+  ])
+    assert.ok(shared.test(path), path);
+  for (const path of [
+    "/transform/cdrs",
+    "/transform/cdrs/",
+    "/transform",
+    "/transform/a/b",
+  ])
+    assert.ok(!shared.test(path), path);
   // Only apps that use the client's own token forward it.
   assert.deepEqual(
     channels.map((channel) => channel.routes[0].forwardAuthHeader),

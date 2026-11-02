@@ -8,6 +8,10 @@
     "config": "apps/normal-mapper.v1.json"
   },
   {
+    "id": "encounter-mapper-v1",
+    "config": "apps/encounter-mapper.v1.json"
+  },
+  {
     "id": "emr-mapper-v1",
     "config": "apps/emr-mapper.v1.json"
   },

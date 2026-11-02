@@ -10,9 +10,18 @@ import {
 import type { AppDefinition, Config } from "./config.js";
 
 export function mediatorDefinition(config: Config, apps: AppDefinition[]) {
-  const channels = apps.map((app) => ({
-    name: `FHIR Middleware: ${app.id}`,
-    urlPattern: `^${app.route}/?$`,
+  const timeout = (app: AppDefinition) =>
+    // Acknowledge mode waits for validation and the dispatch acceptance. FHIR mode also
+    // waits for identity and the FHIR server, row by row (five at a time).
+    app.delivery?.mode === "fhir"
+      ? 120000
+      : app.validation.timeoutMs + (app.delivery?.timeoutMs ?? 0) + 5000;
+  const groups = new Map<string, AppDefinition[]>();
+  for (const app of apps)
+    groups.set(app.channel, [...(groups.get(app.channel) ?? []), app]);
+  const channels = [...groups].map(([name, [app, ...rest]]) => ({
+    name: `FHIR Middleware: ${name}`,
+    urlPattern: app.urlPattern,
     type: "http",
     status: "enabled",
     methods: ["POST"],
@@ -34,12 +43,7 @@ export function mediatorDefinition(config: Config, apps: AppDefinition[]) {
     responseBody: false,
     autoRetryEnabled: false,
     authType: "private",
-    // Acknowledge mode waits for validation and the dispatch acceptance. FHIR mode also
-    // waits for identity and the FHIR server, row by row (five at a time).
-    timeout:
-      app.delivery?.mode === "fhir"
-        ? 120000
-        : app.validation.timeoutMs + (app.delivery?.timeoutMs ?? 0) + 5000,
+    timeout: Math.max(...[app, ...rest].map(timeout)),
     properties: [],
     txViewAcl: [],
     txViewFullAcl: [],

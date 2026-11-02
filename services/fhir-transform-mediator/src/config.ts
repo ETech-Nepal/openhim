@@ -129,6 +129,9 @@ const requestSchema = z
 const appSchema = z
   .object({
     route: z.string().regex(/^\/[a-z0-9/-]*[a-z0-9]$/),
+    // Apps with the same channel share one OpenHIM channel for <parent>/<any name>, e.g.
+    // /transform/patient and /transform/encounter become ^/transform/<name>.
+    channel: id.optional(),
     role: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
     // Require the client's token (forwarded by OpenHIM) and expose the caller's facility
     // to mappings as the field `caller_facility`.
@@ -456,6 +459,9 @@ export function loadCatalog(
     return {
       id,
       route: app.route,
+      channel: app.channel ?? id,
+      shared: app.channel !== undefined,
+      urlPattern: `^${app.route}/?$`,
       roles: typeof app.role === "string" ? [app.role] : app.role,
       auth: app.auth,
       format: app.input.format,
@@ -486,6 +492,32 @@ export function loadCatalog(
     throw new ConfigError("Duplicate app ID");
   if (new Set(apps.map((app) => app.route)).size !== apps.length)
     throw new ConfigError("Duplicate app route");
+  const parent = (route: string) => route.slice(0, route.lastIndexOf("/"));
+  for (const name of new Set(
+    apps.filter((a) => a.shared).map((a) => a.channel),
+  )) {
+    const group = apps.filter((app) => app.channel === name);
+    const [first] = group;
+    const base = parent(first.route);
+    if (
+      !base ||
+      group.some(
+        (app) =>
+          parent(app.route) !== base ||
+          app.auth !== first.auth ||
+          [...app.roles].sort().join() !== [...first.roles].sort().join(),
+      )
+    )
+      throw new ConfigError(
+        `Channel ${name} apps need one parent route, the same roles and auth`,
+      );
+    // Sibling routes owned by other apps keep their own channel and roles.
+    const others = apps
+      .filter((app) => app.channel !== name && parent(app.route) === base)
+      .map((app) => app.route.slice(base.length + 1));
+    const pattern = `^${base}/${others.length ? `(?!(?:${others.join("|")})/?$)` : ""}[^/]+/?$`;
+    for (const app of group) app.urlPattern = pattern;
+  }
   if (
     apps.some((app) => app.auth) &&
     !(env.KEYCLOAK_ISSUER && env.KEYCLOAK_JWKS_URI)

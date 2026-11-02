@@ -1,0 +1,11 @@
+{
+  "facility_code": "3130400221",
+  "encounter_number": "OPD-2026-000123",
+  "status": "finished",
+  "class_code": "AMB",
+  "encounter_type": "new-visit",
+  "patient_reference": "Patient/123",
+  "start": "2026-11-02T10:00:00+05:45",
+  "end": "2026-11-02T10:30:00+05:45",
+  "reason_text": "Fever and cough"
+}
