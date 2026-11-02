@@ -1,11 +1,6 @@
 node_modules
 package-lock.json
-!services/fhir-intake-mediator/package-lock.json
-!services/fhir-transform-mediator/package-lock.json
-!services/fhir-gateway-mediator/package-lock.json
-!services/fhir-mediator/package-lock.json
-!services/admin-mediator/package-lock.json
-!services/patient-portal-mediator/package-lock.json
+!services/*/package-lock.json
 **/dist/
 .env
 *.codex
