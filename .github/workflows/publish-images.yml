@@ -26,7 +26,7 @@ jobs:
           - image: openhie-patient-portal-mediator
             context: services/patient-portal-mediator
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io

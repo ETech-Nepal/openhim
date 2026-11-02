@@ -26,8 +26,8 @@ jobs:
       run:
         working-directory: services/fhir-transform-mediator
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "24.22.1"
           cache: npm
@@ -60,8 +60,8 @@ jobs:
     env:
       TEST_IDENTITY_DB_PORT: "55439"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "24.22.1"
           cache: npm
@@ -79,13 +79,13 @@ jobs:
       run:
         working-directory: hapi-interceptors
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24.22.1"
       # Unit tests, then every access rule against the real HAPI image.
