@@ -20,6 +20,9 @@ const schema = z.object({
   // Role bound to the read-only patient-portal channel (portal BFF system client holds it).
   OPENHIM_PORTAL_CHANNEL_ROLE: z.string().default('patient-portal-clients'),
 
+  // Role bound to the staff PRS channel (/prs/*); the PRS portal BFF's client holds it.
+  OPENHIM_PRS_CHANNEL_ROLE: z.string().default('prs-clients'),
+
   HAPI_FHIR_BASE_URL: z.string().url(),
   HAPI_TIMEOUT_MS: z.coerce.number().default(15000),
 

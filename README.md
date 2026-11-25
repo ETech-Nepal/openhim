@@ -20,9 +20,10 @@ whichever route its request takes.
 | Keycloak | [`keycloak/`](keycloak/README.md) | Clients, SMART scopes per client type, DPoP-bound tokens |
 | JeMPI | [`jempi-config/`](jempi-config/README.md) | Client registry (golden records), on its own host |
 
-`services/patient-portal-mediator` serves the patient portal (outside the PRS scope).
-It reads HAPI with its own read-only client, the only client allowed to find a
-Patient by phone.
+`services/patient-portal-mediator` serves the patient portal and the staff Patient Record
+System API (`GET /prs/search?hid=|nid=|imis=`, `GET /prs/patients/<id>`; own channel and
+role `prs-clients`). It reads HAPI with its own read-only client, the only client allowed to
+find a Patient by phone.
 
 Routes:
 
@@ -33,6 +34,7 @@ Routes:
 | `POST /transform/cdrs` | Transform mediator, `cdrs-v1` (up to 100 rows) |
 | `GET /fhir/...`, `POST`, `PUT /fhir/<Type>[/<id>]` | HAPI |
 | `/admin/*` | Identity mediator (admin portal only) |
+| `GET /prs/*` | Patient portal mediator (PRS portal only) |
 
 No route allows DELETE, and no facility may write Organizations or Practitioners.
 The design and the defects it fixes are in [CRITICAL-FIXES.md](CRITICAL-FIXES.md).

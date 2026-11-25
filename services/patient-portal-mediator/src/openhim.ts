@@ -5,7 +5,7 @@ import { activateHeartbeat, registerMediator, authenticate, genAuthHeaders } fro
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 
-// This mediator owns exactly one channel: the read-only patient-portal channel.
+// This mediator owns exactly two channels: the read-only patient-portal channel and the staff PRS channel.
 // GET-only and bound to its own role, so a portal credential can never write FHIR
 // or reach the write-side /fhir channel owned by the other mediator.
 export const channels = [
@@ -20,6 +20,28 @@ export const channels = [
       {
         name: 'Patient portal mediator route',
         host: config.MEDIATOR_ROUTE_HOST,   // Docker service name on the `openhim` network
+        port: config.MEDIATOR_PORT,
+        primary: true,
+        type: 'http',
+      },
+    ],
+    properties: [],
+    txViewAcl: [],
+    txViewFullAcl: [],
+  },
+  {
+    // Staff Patient Record System API. Separate from the patient channel on purpose:
+    // it can look up any patient, so only the PRS portal's role may call it.
+    name: 'NP PRS',
+    urlPattern: '^/prs/.*$',
+    type: 'http',
+    status: 'enabled',
+    allow: [config.OPENHIM_PRS_CHANNEL_ROLE],
+    methods: ['GET'],
+    routes: [
+      {
+        name: 'PRS route (patient portal mediator)',
+        host: config.MEDIATOR_ROUTE_HOST,
         port: config.MEDIATOR_PORT,
         primary: true,
         type: 'http',

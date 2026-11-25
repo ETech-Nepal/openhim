@@ -1,6 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import { portalResolveHandler, portalSummaryHandler } from './handlers/patientPortal.js';
+import { prsPatientHandler, prsSearchHandler } from './handlers/prs.js';
 import { logger } from './lib/logger.js';
 import { patientContext } from './middleware/patientContext.js';
 
@@ -9,12 +10,15 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(pinoHttp({ logger }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  app.use('/patient-portal', (_req, res, next) => {
+  app.use(['/patient-portal', '/prs'], (_req, res, next) => {
     res.type('application/json+openhim');
     next();
   });
   app.get('/patient-portal/resolve', portalResolveHandler);
   app.get('/patient-portal/summary', patientContext, portalSummaryHandler);
+  // Staff PRS API: its own OpenHIM channel and role, not reachable with the patient portal's.
+  app.get('/prs/search', prsSearchHandler);
+  app.get('/prs/patients/:id', prsPatientHandler);
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     const message = err instanceof Error ? err.message : 'internal server error';
     logger.error({ err: message }, 'unhandled error');

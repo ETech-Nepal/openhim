@@ -97,13 +97,13 @@ export async function portalSummaryHandler(req, res) {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-async function search(resourceType, params, orchestrations, label) {
+export async function search(resourceType, params, orchestrations, label) {
   const { data, status } = await hapi.get(`/${resourceType}`, { params });
   orchestrations.push(orch(`HAPI ${label}`, 'GET', `/${resourceType}`, params, status, { total: data.total }));
   return data;
 }
 
-async function resolveOrgs(encounters, orchestrations) {
+export async function resolveOrgs(encounters, orchestrations) {
   const byRef = new Map();
   for (const e of encounters) {
     const ref = e.serviceProvider?.reference;
@@ -125,12 +125,12 @@ async function resolveOrgs(encounters, orchestrations) {
   return out.filter(r => r.status === 'fulfilled').map(r => r.value);
 }
 
-function wrap(status, body, orchestrations) {
+export function wrap(status, body, orchestrations) {
   return buildOpenHIMResponse({ status, body, orchestrations, urn: config.MEDIATOR_URN });
 }
 
 function getGoldenUid(p) { return (p.identifier || []).find(i => i.system === SYS.JEMPI_GOLDEN_UID)?.value || null; }
-function getPhone(p) { return (p.telecom || []).find(t => t.system === 'phone')?.value || null; }
+export function getPhone(p) { return (p.telecom || []).find(t => t.system === 'phone')?.value || null; }
 
 function mergeProfile(patients) {
   const primary = patients.slice().sort((a, b) => (b.name?.length || 0) - (a.name?.length || 0))[0];
@@ -149,7 +149,7 @@ function mergeProfile(patients) {
 // an internal resource id and must never be rendered — nothing here exposes one as
 // a user-facing label. `visitNumber` is the hospital's own encounter number, which
 // is the meaningful thing to show a patient.
-function shapeEncounter(e, orgNames = new Map()) {
+export function shapeEncounter(e, orgNames = new Map()) {
   return {
     id: e.id, status: e.status || null,
     visitNumber:
@@ -163,7 +163,7 @@ function shapeEncounter(e, orgNames = new Map()) {
   };
 }
 
-function shapeReport(r, obsByRef = new Map(), orgNames = new Map()) {
+export function shapeReport(r, obsByRef = new Map(), orgNames = new Map()) {
   return {
     id: r.id, status: r.status || null,
     code: r.code?.text || r.code?.coding?.[0]?.display || 'Report',
@@ -182,7 +182,7 @@ function shapeReport(r, obsByRef = new Map(), orgNames = new Map()) {
 }
 
 // One analyte: what was measured, what came out, and whether that is normal.
-function shapeResult(o) {
+export function shapeResult(o) {
   const q = o.valueQuantity;
   return {
     name: o.code?.text || o.code?.coding?.[0]?.display || 'Result',
@@ -211,7 +211,7 @@ function formatRange(rr) {
 
 // Group each visit's reports onto it, so a visit can be opened and read on its own
 // without the UI having to re-derive the relationship.
-function attachReports(encounters, reports) {
+export function attachReports(encounters, reports) {
   const byEncounter = new Map();
   for (const r of reports) {
     if (!r.encounterId) continue;
@@ -223,7 +223,7 @@ function attachReports(encounters, reports) {
 
 // A facility is always named, never identified by a resource id: falling back to a
 // raw reference put a UUID in front of the patient.
-function hospitalName(ref, orgNames) {
+export function hospitalName(ref, orgNames) {
   if (!ref) return null;
   return ref.display || orgNames.get(ref.reference) || null;
 }
@@ -231,7 +231,7 @@ function hospitalName(ref, orgNames) {
 function identifierValue(res, system) {
   return (res.identifier || []).find(i => i.system === system)?.value || null;
 }
-function shapeDocument(d) {
+export function shapeDocument(d) {
   const c = d.content?.[0];
   return {
     id: d.id, title: d.description || d.type?.text || d.type?.coding?.[0]?.display || 'Document',
@@ -239,16 +239,16 @@ function shapeDocument(d) {
     date: d.date || null,
   };
 }
-function byDateDesc(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); }
-function refId(ref) { return ref ? ref.split('/').pop() : null; }
+export function byDateDesc(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); }
+export function refId(ref) { return ref ? ref.split('/').pop() : null; }
 function firstIdentifier(ps, sys) { for (const p of ps) { const v = (p.identifier || []).find(i => i.system === sys)?.value; if (v) return v; } return null; }
 function firstTelecom(ps, sys) { for (const p of ps) { const v = (p.telecom || []).find(t => t.system === sys)?.value; if (v) return v; } return null; }
-function formatName(p) {
+export function formatName(p) {
   const n = (p.name || []).find(x => x.use === 'official') || p.name?.[0];
   if (!n) return '';
   return n.text || [(n.given || []).join(' '), n.family].filter(Boolean).join(' ').trim();
 }
-function formatAddress(a) {
+export function formatAddress(a) {
   if (!a) return null;
   return a.text || [a.line?.join(', '), a.city, a.district, a.state, a.country].filter(Boolean).join(', ');
 }

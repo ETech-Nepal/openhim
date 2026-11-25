@@ -4,6 +4,11 @@
 export const SYS = {
   NEPAL_HEALTH_ID: 'http://fhir.digitalhealth.gov.np/core/NamingSystem/nepal-health-id',
   JEMPI_GOLDEN_UID: 'http://mohp.gov.np/fhir/NamingSystem/jempi-golden-uid',
+  NATIONAL_ID: 'http://donidcr.gov.np',
+  INSURANCE_NUMBER: 'http://hib.gov.np',
+  NHFR: 'http://nhfr.digitalhealth.gov.np',
+  // MRNs are scoped per facility: <prefix>/<nhfr code>.
+  HOSPITAL_MRN_PREFIX: 'http://mohp.gov.np/fhir/NamingSystem/hospital-mrn/',
   // The hospital's own visit number — what a patient is told at the desk, and the
   // only visit label safe to show (the resource id is an internal UUID).
   // NP Core np-enc-1: encounter numbers live under http://nhfr.digitalhealth.gov.np/{nhfrCode}.
