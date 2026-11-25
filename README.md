@@ -21,8 +21,8 @@ whichever route its request takes.
 | JeMPI | [`jempi-config/`](jempi-config/README.md) | Client registry (golden records), on its own host |
 
 `services/patient-portal-mediator` serves the patient portal and the staff Patient Record
-System API (`GET /prs/search?hid=|nid=|imis=`, `GET /prs/patients/<id>`; own channel and
-role `prs-clients`). It reads HAPI with its own read-only client, the only client allowed to
+System API (`GET /prs/search?hid=|nid=|imis=` returns a FHIR Bundle of Patient, `GET /prs/patients/<id>`
+a FHIR Bundle of the patient's record; own channel and role `prs-clients`). It reads HAPI with its own read-only client, the only client allowed to
 find a Patient by phone.
 
 Routes:

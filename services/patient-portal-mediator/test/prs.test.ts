@@ -40,50 +40,55 @@ test('search needs an identifier and rejects malformed values', async () => {
   }
 });
 
-test('search maps hid/nid/imis to their identifier systems and merges hits', async (t) => {
+test('search maps hid/nid/imis to their identifier systems and returns a FHIR searchset', async (t) => {
   const calls = fakeHapi(t, () => bundle([patient]));
   const res = response();
   await prsSearchHandler({ query: { hid: '1234', nid: '99-88', imis: '818485780' }, headers: {} }, res);
   assert.deepEqual(calls.map((c) => c.params.identifier).sort(), [
     `${SYS.INSURANCE_NUMBER}|818485780`, `${SYS.NATIONAL_ID}|99-88`, `${SYS.NEPAL_HEALTH_ID}|1234`,
   ].sort());
-  const { patients } = body(res);
-  assert.equal(patients.length, 1);
-  assert.deepEqual(patients[0].identifiers, { healthId: '1234', nationalId: '99-88', imis: '818485780' });
-  assert.deepEqual(patients[0].mrns, [{ facilityCode: '3130400221', mrn: 'M-1' }]);
+  const out = body(res);
+  assert.equal(out.resourceType, 'Bundle');
+  assert.equal(out.type, 'searchset');
+  assert.equal(out.total, 1);
+  assert.equal(out.entry[0].resource.resourceType, 'Patient');
+  assert.equal(out.entry[0].resource.id, 'p1');
 });
 
-test('search shows the survivor of a merged patient, not the retired one', async (t) => {
+test('search returns the survivor of a merged patient, not the retired one', async (t) => {
   const retired = { ...patient, id: 'old', active: false, link: [{ type: 'replaced-by', other: { reference: 'Patient/p1' } }] };
   fakeHapi(t, (c) => (c.url === '/Patient/p1' ? patient : bundle([retired])));
   const res = response();
   await prsSearchHandler({ query: { hid: '1234' }, headers: {} }, res);
-  assert.deepEqual(body(res).patients.map((p) => p.id), ['p1']);
+  assert.deepEqual(body(res).entry.map((e) => e.resource.id), ['p1']);
 });
 
-test('record groups diagnoses, reports and loose results under their encounter, and flags gaps', async (t) => {
+test('record is one FHIR collection: patient, clinical resources, organizations, and an outcome for gaps', async (t) => {
   const calls = fakeHapi(t, (c) => {
     if (c.url === '/Patient/p1') return patient;
-    if (c.url === '/Encounter') return bundle([{ id: 'e1', status: 'finished', period: { start: '2026-01-05' }, serviceProvider: { reference: 'Organization/o1', display: 'Bharatpur Hospital' } }], true);
-    if (c.url === '/Condition') return bundle([{ id: 'c1', code: { text: 'Hypertension' }, encounter: { reference: 'Encounter/e1' } }]);
-    if (c.url === '/DiagnosticReport') return bundle([{ id: 'r1', code: { text: 'CBC' }, encounter: { reference: 'Encounter/e1' }, result: [{ reference: 'Observation/o1' }] }]);
-    if (c.url === '/Observation') return bundle([
-      { id: 'o1', code: { text: 'Hb' }, valueQuantity: { value: 12, unit: 'g/dL' } },
-      { id: 'o2', code: { text: 'Pulse' }, valueQuantity: { value: 80 }, encounter: { reference: 'Encounter/e1' } },
-    ]);
+    if (c.url === '/Organization/o1') return { resourceType: 'Organization', id: 'o1', name: 'Bharatpur Hospital' };
+    if (c.url === '/Encounter') return bundle([{ resourceType: 'Encounter', id: 'e1', status: 'finished', serviceProvider: { reference: 'Organization/o1' } }], true);
+    if (c.url === '/Condition') return bundle([{ resourceType: 'Condition', id: 'c1' }]);
+    if (c.url === '/DiagnosticReport') return bundle([{ resourceType: 'DiagnosticReport', id: 'r1' }]);
+    if (c.url === '/Observation') return bundle([{ resourceType: 'Observation', id: 'o1x' }]);
     return new Error('DocumentReference unavailable');
   });
   const res = response();
   await prsPatientHandler({ params: { id: 'p1' }, headers: { 'x-prs-user': 'staff' } }, res);
-  assert.ok(calls.filter((c) => c.url !== '/Patient/p1').every((c) => c.params?.subject === 'Patient/p1'));
+  assert.ok(calls.filter((c) => c.url !== '/Patient/p1' && c.url !== '/Organization/o1').every((c) => c.params?.subject === 'Patient/p1'));
   const out = body(res);
-  const [enc] = out.encounters;
-  assert.equal(enc.hospital, 'Bharatpur Hospital');
-  assert.deepEqual(enc.diagnoses.map((d) => d.name), ['Hypertension']);
-  assert.deepEqual(enc.reports.map((r) => r.results[0].name), ['Hb']);
-  assert.deepEqual(enc.observations.map((o) => o.name), ['Pulse']);
-  assert.deepEqual(out.truncated, ['Encounter']);
-  assert.deepEqual(out.partial, ['DocumentReference']);
+  assert.equal(out.type, 'collection');
+  const types = out.entry.map((e) => e.resource.resourceType);
+  assert.deepEqual([...new Set(types)].sort(), ['Condition', 'DiagnosticReport', 'Encounter', 'Observation', 'Organization', 'OperationOutcome', 'Patient'].sort());
+  const oo = out.entry.find((e) => e.resource.resourceType === 'OperationOutcome').resource;
+  assert.deepEqual(oo.issue.map((i) => [i.code, i.expression[0]]).sort(), [['incomplete', 'DocumentReference'], ['too-long', 'Encounter']]);
+});
+
+test('a complete record carries no OperationOutcome', async (t) => {
+  fakeHapi(t, (c) => (c.url === '/Patient/p1' ? patient : bundle([])));
+  const res = response();
+  await prsPatientHandler({ params: { id: 'p1' }, headers: {} }, res);
+  assert.deepEqual(body(res).entry.map((e) => e.resource.resourceType), ['Patient']);
 });
 
 test('record rejects odd ids and reports an unknown patient as 404', async (t) => {
