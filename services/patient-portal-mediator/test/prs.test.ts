@@ -51,6 +51,9 @@ test('search maps hid/nid/imis to their identifier systems and returns a FHIR se
   assert.equal(out.resourceType, 'Bundle');
   assert.equal(out.type, 'searchset');
   assert.equal(out.total, 1);
+  const queries = JSON.parse(decodeURIComponent(res.body.response.headers['X-FHIR-Queries']));
+  assert.equal(queries.length, 3);
+  assert.ok(queries.every((q) => q.startsWith('GET http') && q.includes('/Patient?identifier=')));
   assert.equal(out.entry[0].resource.resourceType, 'Patient');
   assert.equal(out.entry[0].resource.id, 'p1');
 });

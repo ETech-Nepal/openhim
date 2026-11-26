@@ -126,7 +126,7 @@ may do is a Keycloak change only.
 | hospital | `system/Patient.crus system/Encounter.crus system/Observation.crus system/DocumentReference.crus system/Condition.crus system/Procedure.crus system/AllergyIntolerance.crus system/Immunization.crus system/MedicationRequest.crus system/ServiceRequest.crus system/DiagnosticReport.rs system/Specimen.rs system/Practitioner.rs system/Organization.rs system/Binary.r` |
 | laboratory | `system/Patient.crus system/ServiceRequest.rs system/Specimen.crus system/Observation.crus system/DiagnosticReport.crus system/Organization.rs system/Practitioner.rs` |
 | identity mediator | `system/Patient.cru` and read on clinical types (merge record move: `system/*.ru`) |
-| admin portal | `np-admin-clients` role for `/admin/*` only |
+| admin portal | `np-admin-clients` role for `/admin/*` and `POST /fhir/Organization`; `system/Organization.c` |
 
 The exact resource list per type is confirmed with MoHP before go-live. No
 client gets a `d` (delete) scope.

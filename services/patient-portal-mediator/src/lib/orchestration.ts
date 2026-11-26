@@ -1,11 +1,11 @@
 // @ts-nocheck
-export function buildOpenHIMResponse({ status, body, orchestrations = [], urn }) {
+export function buildOpenHIMResponse({ status, body, orchestrations = [], urn, headers = {} }) {
   return {
     'x-mediator-urn': urn,
     status: status >= 200 && status < 300 ? 'Successful' : 'Failed',
     response: {
       status,
-      headers: { 'Content-Type': 'application/fhir+json' },
+      headers: { 'Content-Type': 'application/fhir+json', ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
       timestamp: new Date().toISOString(),
     },
@@ -29,3 +29,11 @@ export function orch(name, method, path, reqBody, status, resBody) {
   };
 }
 // @ts-nocheck
+
+// The FHIR server requests behind a reply, as readable lines, for the portals' "Request" view.
+export function fhirQueries(orchestrations, baseUrl) {
+  return orchestrations.map(({ request }) => {
+    const query = request.body ? Object.entries(JSON.parse(request.body)).map(([k, v]) => `${k}=${v}`).join('&') : '';
+    return `${request.method} ${baseUrl}${request.path}${query ? `?${query}` : ''}`;
+  });
+}

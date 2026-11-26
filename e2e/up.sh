@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Brings up the single_stack deployment for a local end-to-end run, in a scratch copy
+# Brings up the openhim_single deployment for a local end-to-end run, in a scratch copy
 # so the real .env, env/*.env and keys/ are never touched, with shifted host ports (the
 # 1xxxx range) and a JeMPI stub. Images: build them with the tag "e2e" first.
 #   e2e/up.sh <scratch-dir>      then: e2e/down.sh <scratch-dir>
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-STACK_SRC="${STACK_SRC:-$HERE/../../single_stack}"
+STACK_SRC="${STACK_SRC:-$HERE/../../openhim_single}"
 WORK="${1:?usage: up.sh <scratch-dir>}"
 rm -rf "$WORK"; mkdir -p "$WORK"
 cp -r "$STACK_SRC"/. "$WORK"/

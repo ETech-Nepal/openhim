@@ -2,12 +2,13 @@
 import { SYS } from '../fhir/identifiers.js';
 import { hapi } from '../fhir/hapiClient.js';
 import { logger } from '../lib/logger.js';
-import { orch } from '../lib/orchestration.js';
+import { config } from '../config.js';
+import { fhirQueries, orch } from '../lib/orchestration.js';
 import { search, wrap } from './patientPortal.js';
 
 // Staff Patient Record System API, behind its own OpenHIM channel (/prs/*, role
 // prs-clients). It returns FHIR R4 as read from HAPI; it does NOT reshape anything.
-// Turning the Bundle into screens is the client's job (prs_ui/src/fhir.js).
+// Turning the Bundle into screens is the client's job (prs/ui/src/fhir.js).
 //
 //   GET /prs/search?hid=|nid=|imis=   -> Bundle (searchset) of Patient
 //   GET /prs/patients/:id             -> Bundle (collection): the Patient and everything about
@@ -26,6 +27,9 @@ const PATIENT_ID = /^[A-Za-z0-9.-]{1,64}$/;
 const PAGE = 100; // HAPI's max_page_size; a longer section is flagged `too-long`, never silently cut.
 const MAX_ORGS = 20;
 
+// The FHIR queries travel in a header so the Bundle stays pure FHIR.
+const trace = (orchestrations) =>
+  ({ 'X-FHIR-Queries': encodeURIComponent(JSON.stringify(fhirQueries(orchestrations, config.HAPI_FHIR_BASE_URL))) });
 const who = (req) => String(req.headers['x-prs-user'] || 'unknown').slice(0, 80);
 const refId = (ref) => (ref ? String(ref).split('/').pop() : null);
 const entry = (r) => ({ fullUrl: `${r.resourceType}/${r.id}`, resource: r });
@@ -74,7 +78,7 @@ export async function prsSearchHandler(req, res) {
     }
     logger.info({ by: who(req), via: asked, hits: found.size }, 'prs search');
     const patients = [...found.values()];
-    return res.status(200).json(wrap(200, bundle('searchset', patients, { total: patients.length }), orchestrations));
+    return res.status(200).json(wrap(200, bundle('searchset', patients, { total: patients.length }), orchestrations, trace(orchestrations)));
   } catch (err) {
     logger.error({ err: err.message }, 'prs search failed');
     return res.status(502).json(wrap(502, { error: 'search failed' }, orchestrations));
@@ -131,7 +135,7 @@ export async function prsPatientHandler(req, res) {
       ...resources,
       ...orgs.filter((o) => o.status === 'fulfilled').map((o) => o.value),
       ...(outcomeEntry ? [outcomeEntry] : []),
-    ].map((r) => (r.id ? r : { ...r, id: 'outcome' }))), orchestrations));
+    ].map((r) => (r.id ? r : { ...r, id: 'outcome' }))), orchestrations, trace(orchestrations)));
   } catch (err) {
     logger.error({ err: err.message, patient: id }, 'prs patient failed');
     return res.status(502).json(wrap(502, { error: 'could not load the record' }, orchestrations));

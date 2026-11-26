@@ -5,7 +5,7 @@ import { SignJWT } from 'jose';
 await import('./fixtures/env.js');
 
 const { patientContext } = await import('../src/middleware/patientContext.js');
-const { portalSummaryHandler } = await import('../src/handlers/patientPortal.js');
+const { portalResolveHandler, portalSummaryHandler } = await import('../src/handlers/patientPortal.js');
 const { hapi } = await import('../src/fhir/hapiClient.js');
 const { SYS } = await import('../src/fhir/identifiers.js');
 const key = new TextEncoder().encode(process.env.PORTAL_PATIENT_SHARED_SECRET);
@@ -61,9 +61,27 @@ test('summary scopes all clinical reads to the signed identity despite forged re
   await portalSummaryHandler(req, res);
   assert.equal(res.statusCode, 200);
   assert.equal(calls.length, 5);
-  assert.deepEqual(JSON.parse(res.body.response.body), {
+  const { fhir, queries, ...summary } = JSON.parse(res.body.response.body);
+  assert.deepEqual(fhir.entry.map((e) => e.fullUrl), ['Patient/opaque-authorized']);
+  assert.equal(queries.length, 5);
+  assert.ok(queries[0].endsWith(`/Patient?identifier=${SYS.JEMPI_GOLDEN_UID}|0x1&_count=50`));
+  assert.deepEqual(summary, {
     profile: { name: 'Synthetic Patient', gender: null, birthDate: null, phone: null, email: null, address: null, healthId: null, linkedRecords: 1 },
     hospitals: [], encounters: [], reports: [], documents: [],
   });
 });
 // @ts-nocheck
+
+test('resolve by Health ID reports the FHIR query that found the patient', async t => {
+  const previous = hapi.defaults.adapter;
+  t.after(() => { hapi.defaults.adapter = previous; });
+  hapi.defaults.adapter = async config => ({
+    config, status: 200, statusText: 'OK', headers: {},
+    data: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'Patient', id: 'p', identifier: [{ system: SYS.JEMPI_GOLDEN_UID, value: '0x1' }] } }] },
+  });
+  const res = response();
+  await portalResolveHandler({ query: { healthId: '123' } }, res);
+  const { queries } = JSON.parse(res.body.response.body);
+  assert.equal(queries.length, 1);
+  assert.ok(queries[0].endsWith(`/Patient?identifier=${SYS.NEPAL_HEALTH_ID}|123&_count=1`));
+});

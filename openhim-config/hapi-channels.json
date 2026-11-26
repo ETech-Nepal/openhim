@@ -64,5 +64,32 @@
     ],
     "description": "Single-resource writes, straight to HAPI. Patient writes (identity mediator) and Bundles (transform mediator) match their priority-1 channels first.",
     "urlPattern": "^/fhir/[A-Z][A-Za-z]+(/[^/]+)?$"
+  },
+  {
+    "name": "NP Admin Organization onboarding",
+    "type": "http",
+    "status": "enabled",
+    "authType": "private",
+    "requestBody": true,
+    "responseBody": true,
+    "priority": 1,
+    "allow": ["np-admin-clients"],
+    "routes": [
+      {
+        "name": "HAPI FHIR",
+        "host": "fhir",
+        "port": 8080,
+        "primary": true,
+        "type": "http",
+        "secured": false,
+        "forwardAuthHeader": true
+      }
+    ],
+    "properties": [],
+    "txViewAcl": [],
+    "txViewFullAcl": [],
+    "methods": ["POST"],
+    "description": "Admin portal: conditional create of facility Organizations (If-None-Exist). POST only, so hospital Organization reads still reach NP FHIR read.",
+    "urlPattern": "^/fhir/Organization/?$"
   }
 ]

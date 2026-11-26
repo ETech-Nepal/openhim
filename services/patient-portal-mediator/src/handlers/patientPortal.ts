@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { hapi } from '../fhir/hapiClient.js';
-import { buildOpenHIMResponse, orch } from '../lib/orchestration.js';
+import { buildOpenHIMResponse, fhirQueries, orch } from '../lib/orchestration.js';
 import { SYS } from '../fhir/identifiers.js';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
@@ -28,6 +28,7 @@ export async function portalResolveHandler(req, res) {
       goldenUid: getGoldenUid(patient),
       phone: getPhone(patient),
       displayName: formatName(patient),
+      queries: fhirQueries(orchestrations, config.HAPI_FHIR_BASE_URL),
     }, orchestrations));
   } catch (err) {
     logger.error({ err: err.message }, 'portal resolve failed');
@@ -71,7 +72,8 @@ export async function portalSummaryHandler(req, res) {
       buckets[i % 4].push(...(r.value.entry || []).map(e => e.resource).filter(Boolean));
     });
 
-    const hospitals = await resolveOrgs(encounters, orchestrations);
+    const organizations = []; // the Organization resources read below, for the raw FHIR view
+    const hospitals = await resolveOrgs(encounters, orchestrations, organizations);
     // reference -> display name, so no caller has to touch a raw resource id.
     const orgNames = new Map(hospitals.map(h => [h.reference, h.name]));
     const obsByRef = new Map(observations.map(o => [`Observation/${o.id}`, o]));
@@ -87,6 +89,13 @@ export async function portalSummaryHandler(req, res) {
       encounters: attachReports(shapedEncounters, shapedReports),
       reports: shapedReports,
       documents: docs.map(shapeDocument).sort(byDateDesc),
+      // The patient's own resources exactly as HAPI returned them, and the queries that fetched them.
+      fhir: {
+        resourceType: 'Bundle', type: 'collection',
+        entry: [...patients, ...encounters, ...reports, ...docs, ...observations, ...organizations]
+          .map((resource) => ({ fullUrl: `${resource.resourceType}/${resource.id}`, resource })),
+      },
+      queries: fhirQueries(orchestrations, config.HAPI_FHIR_BASE_URL),
     };
     return res.status(200).json(wrap(200, summary, orchestrations));
   } catch (err) {
@@ -103,7 +112,7 @@ export async function search(resourceType, params, orchestrations, label) {
   return data;
 }
 
-async function resolveOrgs(encounters, orchestrations) {
+async function resolveOrgs(encounters, orchestrations, organizations) {
   const byRef = new Map();
   for (const e of encounters) {
     const ref = e.serviceProvider?.reference;
@@ -119,14 +128,15 @@ async function resolveOrgs(encounters, orchestrations) {
     try {
       const { data, status } = await hapi.get(`/Organization/${id}`);
       orchestrations.push(orch('HAPI Organization', 'GET', `/Organization/${id}`, null, status, { name: data.name }));
+      organizations.push(data);
       return { reference: ref, name: data.name || null };
     } catch { return { reference: ref, name: null }; }
   }));
   return out.filter(r => r.status === 'fulfilled').map(r => r.value);
 }
 
-export function wrap(status, body, orchestrations) {
-  return buildOpenHIMResponse({ status, body, orchestrations, urn: config.MEDIATOR_URN });
+export function wrap(status, body, orchestrations, headers) {
+  return buildOpenHIMResponse({ status, body, orchestrations, headers, urn: config.MEDIATOR_URN });
 }
 
 function getGoldenUid(p) { return (p.identifier || []).find(i => i.system === SYS.JEMPI_GOLDEN_UID)?.value || null; }
